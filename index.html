@@ -4,158 +4,16 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>한양대학교 — 사랑의 실천, LOVE IN DEED</title>
-    <meta name="description" content="1939년, 사랑의 실천으로 시작된 대학. 도면 위에서 조립되는 한양대학교 이야기." />
-    <meta name="theme-color" content="#061a36" />
+    <meta name="description" content="1939년, 사랑의 실천으로 시작된 대학. 설계하고, 실천하는 한양대학교." />
+    <meta name="theme-color" content="#05070c" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@500;800&family=JetBrains+Mono:wght@400;600&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
   </head>
   <body>
-    <div class="grid-bg" aria-hidden="true"></div>
-
-    <header class="nav">
-      <a href="#hero" class="nav__logo"><span class="nav__mark">HY</span> HANYANG <em>/ BLUEPRINT</em></a>
-      <nav class="nav__links">
-        <a href="#deed">Deed</a><a href="#lion">Lion</a><a href="#since">1939</a><a href="#campus">Campus</a><a href="#colleges">Colleges</a>
-      </nav>
-      <a class="nav__cta" href="https://go.hanyang.ac.kr" target="_blank" rel="noopener">입학 안내 ↗</a>
-    </header>
-
-    <main>
-      <!-- HERO: scattered drafting lines assemble into HANYANG -->
-      <section class="hero" id="hero">
-        <canvas id="cvHero" class="hero__canvas"></canvas>
-        <div class="hero__sheet">
-          <div class="tag tag--tl">DWG No. HY-1939 &nbsp;·&nbsp; SHEET 01/06</div>
-          <div class="tag tag--tr">SCALE 1 : 1 &nbsp;·&nbsp; SEOUL / ERICA</div>
-          <div class="hero__copy">
-            <p class="hero__kicker mono">PROJECT — 사랑의 실천</p>
-            <h1 class="hero__title">LOVE<br />IN DEED</h1>
-            <p class="hero__sub">생각을 설계하고, 사랑을 짓는다.<br />한양대학교는 <b>실천</b>으로 증명합니다.</p>
-          </div>
-          <div class="hero__dim mono" aria-hidden="true"><span></span>ASSEMBLING · 드래그해서 도면을 돌려보세요</div>
-          <div class="tag tag--bl mono">DRAWN BY TEAM SEMICOLON</div>
-          <a class="tag tag--br mono scroll-cue" href="#deed">SCROLL ↓</a>
-        </div>
-      </section>
-
-      <!-- 01 DEED: four virtues as interlocking gears -->
-      <section class="deed" id="deed">
-        <div class="deed__sticky">
-          <div class="sec-head">
-            <p class="mono eyebrow">01 — FOUNDING PHILOSOPHY</p>
-            <h2>사랑의 실천<br /><span class="en">Love in Deed and Truth</span></h2>
-            <p class="lead">말이 아니라 행동으로. 한양이 길러내는 사람은 네 가지 덕목을 갖춘 <b>사랑의 실천자</b>입니다. 하나의 톱니가 돌면, 나머지가 함께 움직입니다.</p>
-          </div>
-          <div class="gears" id="gears" aria-label="근면, 정직, 겸손, 봉사">
-            <svg viewBox="0 0 800 620" class="gears__svg"></svg>
-          </div>
-        </div>
-      </section>
-
-      <!-- 02 LION: blueprint line drawing drawn by scroll -->
-      <section class="lion" id="lion">
-        <div class="lion__sticky">
-          <div class="lion__art">
-            <svg viewBox="-260 -260 520 520" id="lionSvg" aria-label="한양의 상징, 사자"></svg>
-            <div class="lion__notes">
-              <div class="note note--a"><span class="mono">A</span>용기가 있되 만용을 멀리하며</div>
-              <div class="note note--b"><span class="mono">B</span>위엄을 품위로 갖추고</div>
-              <div class="note note--c"><span class="mono">C</span>앞서되 교만하지 않는</div>
-              <div class="note note--d"><span class="mono">D</span>지성인의 의지</div>
-            </div>
-          </div>
-          <div class="sec-head sec-head--side">
-            <p class="mono eyebrow">02 — SYMBOL</p>
-            <h2>한양의 사자</h2>
-            <p class="lead">한양의 상징 동물은 사자입니다. 스크롤할수록 도면 위에 한 획씩 그려지는 사자는, 앞서 나가되 교만하지 않는 한양인의 자세를 닮았습니다.</p>
-            <p class="mono meta">MASCOT — 하이리온 (HanYang + Lion)</p>
-          </div>
-        </div>
-      </section>
-
-      <!-- 03 SINCE 1939: dimension-line timeline -->
-      <section class="since" id="since">
-        <div class="since__sticky">
-          <div class="sec-head">
-            <p class="mono eyebrow">03 — SINCE 1939</p>
-            <h2>공학에서 시작해<br />세상을 설계하기까지</h2>
-          </div>
-          <div class="timeline">
-            <div class="timeline__rail"><div class="timeline__fill"></div></div>
-            <div class="tl" style="--x:0">
-              <span class="tl__year">1939</span>
-              <p>김연준 설립자가 <b>동아공과학원</b>을 세우다. 일제강점기, 사랑의 실천을 건학이념으로.</p>
-            </div>
-            <div class="tl" style="--x:1">
-              <span class="tl__year">1942</span>
-              <p><b>동아고등공업학원</b>으로 인가. 공학 교육의 뿌리가 되다.</p>
-            </div>
-            <div class="tl" style="--x:2">
-              <span class="tl__year">NOW</span>
-              <p>서울과 ERICA, <b>두 캠퍼스</b>에서 공학·의학·인문·예술을 아우르는 종합대학으로.</p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- 04 CAMPUS -->
-      <section class="campus" id="campus">
-        <div class="sec-head">
-          <p class="mono eyebrow">04 — TWO CAMPUSES</p>
-          <h2>하나의 한양, 두 개의 도면</h2>
-        </div>
-        <div class="campus__cards">
-          <article class="plan" data-plan="seoul">
-            <div class="plan__draw"><svg viewBox="0 0 400 260"></svg></div>
-            <div class="plan__body">
-              <p class="mono">SITE A — SEOUL</p>
-              <h3>서울캠퍼스</h3>
-              <p>서울 성동구. 왕십리의 언덕 위, 공과대학과 의과대학을 비롯한 한양의 본교.</p>
-            </div>
-          </article>
-          <article class="plan" data-plan="erica">
-            <div class="plan__draw"><svg viewBox="0 0 400 260"></svg></div>
-            <div class="plan__body">
-              <p class="mono">SITE B — ERICA</p>
-              <h3>ERICA캠퍼스</h3>
-              <p>경기 안산. 산학협력과 융합을 설계하는, 현장과 가장 가까운 캠퍼스.</p>
-            </div>
-          </article>
-        </div>
-      </section>
-
-      <!-- 05 COLLEGES -->
-      <section class="colleges" id="colleges">
-        <div class="sec-head">
-          <p class="mono eyebrow">05 — SPEC SHEET</p>
-          <h2>당신이 설계할 전공은?</h2>
-        </div>
-        <div class="tabs" role="tablist">
-          <button class="tab is-active" data-tab="seoul" role="tab">서울캠퍼스</button>
-          <button class="tab" data-tab="erica" role="tab">ERICA캠퍼스</button>
-        </div>
-        <ol class="spec" id="spec"></ol>
-      </section>
-
-      <!-- FINALE -->
-      <section class="finale" id="finale">
-        <canvas id="cvFinale" class="finale__canvas"></canvas>
-        <div class="finale__inner">
-          <p class="mono eyebrow">SHEET 06/06 — APPROVED</p>
-          <h2>사랑의 실천자,<br />한양에서 시작됩니다.</h2>
-          <a class="btn" href="https://go.hanyang.ac.kr" target="_blank" rel="noopener">입학처 바로가기 →</a>
-          <div class="stamp" aria-hidden="true">LOVE<br />IN DEED</div>
-        </div>
-        <footer class="footer mono">
-          <span>본 페이지는 Team Semicolon이 제작한 비공식 홍보 페이지입니다.</span>
-          <span>한양대학교 공식 정보: <a href="https://www.hanyang.ac.kr" target="_blank" rel="noopener">hanyang.ac.kr</a></span>
-        </footer>
-      </section>
-    </main>
-
-    <script type="module" src="/src/main.js"></script>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
