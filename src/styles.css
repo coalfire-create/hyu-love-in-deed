@@ -69,6 +69,10 @@ h2 { font-size: clamp(34px, 5.4vw, 84px); font-weight: 800; line-height: 1.06; l
 .tag span { padding-left: 26px; position: relative; font-size: 10px; color: var(--sky); }
 .tag span::before { content: ''; position: absolute; left: 4px; top: 50%; width: 18px; height: 1px; background: var(--sky); }
 .tag b { font-family: var(--mono); font-size: 11px; font-weight: 600; letter-spacing: 0.06em; padding: 5px 9px; border-radius: 6px; background: rgba(5, 10, 22, 0.7); border: 1px solid rgba(127, 178, 255, 0.3); backdrop-filter: blur(8px); transition: background 0.3s, color 0.3s; }
+.tag--left { flex-direction: row-reverse; }
+.tag--left i { margin-left: 0; margin-right: -5px; }
+.tag--left span { padding-left: 0; padding-right: 26px; }
+.tag--left span::before { left: auto; right: 4px; }
 .tag.on b { background: var(--sky); color: var(--ink); }
 .tag--campus b { font-size: 13px; }
 

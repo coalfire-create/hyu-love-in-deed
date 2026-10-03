@@ -165,7 +165,7 @@ export default function App() {
 
       <div className="labels" ref={labels} aria-hidden>
         {PARTS.map((p) => (
-          <div className="tag" key={p.no}>
+          <div className={p.no === '03' ? 'tag tag--left' : 'tag'} key={p.no}>
             <i />
             <span className="mono">{p.no}</span>
             <b>{p.en}</b>

@@ -62,6 +62,91 @@ function dotTexture() {
   return new THREE.CanvasTexture(c);
 }
 
+const WHEEL_Y_ALL = -0.61;
+
+// 1차원 캣멀-롬(에르미트) 스플라인: [x, 값] 키들을 부드럽게 잇는다
+function spline(keys: [number, number][]) {
+  const n = keys.length;
+  const m = keys.map((_, i) => {
+    const a = keys[Math.max(0, i - 1)], b = keys[Math.min(n - 1, i + 1)];
+    return (b[1] - a[1]) / (b[0] - a[0] || 1);
+  });
+  return (x: number) => {
+    if (x <= keys[0][0]) return keys[0][1];
+    if (x >= keys[n - 1][0]) return keys[n - 1][1];
+    let i = 1;
+    while (keys[i][0] < x) i++;
+    const [x0, y0] = keys[i - 1], [x1, y1] = keys[i];
+    const h = x1 - x0, t = (x - x0) / h, t2 = t * t, t3 = t2 * t;
+    return (2 * t3 - 3 * t2 + 1) * y0 + (t3 - 2 * t2 + t) * h * m[i - 1] + (-2 * t3 + 3 * t2) * y1 + (t3 - t2) * h * m[i];
+  };
+}
+
+interface LoftOpts {
+  x0: number; x1: number; // 꼬리 · 코 끝
+  cap0: number; cap1: number; // 양 끝을 둥글게 오므리는 길이
+  top: (x: number) => number; bot: (x: number) => number; half: (x: number) => number;
+  n: number; nBot: number; // 슈퍼타원 지수 (클수록 각진 단면)
+  stations: number; ring: number;
+  carve?: (x: number, y: number, z: number) => [number, number] | null;
+}
+
+// 슈퍼타원 단면을 x축을 따라 이어 붙여 매끈한 차체 곡면을 만든다
+function loft(o: LoftOpts) {
+  const pw = (v: number, e: number) => Math.sign(v) * Math.pow(Math.abs(v), e);
+  const capScale = (x: number) => {
+    if (x > o.x1 - o.cap1) { const t = (x - (o.x1 - o.cap1)) / o.cap1; return Math.sqrt(Math.max(0, 1 - t * t)); }
+    if (x < o.x0 + o.cap0) { const t = (o.x0 + o.cap0 - x) / o.cap0; return Math.sqrt(Math.max(0, 1 - t * t)); }
+    return 1;
+  };
+  const surf = (x: number, th: number, k = 1) => {
+    const s = capScale(x);
+    const yt = o.top(x), yb = o.bot(x), yc = (yt + yb) / 2, hh = ((yt - yb) / 2) * s;
+    const c = Math.cos(th), sn = Math.sin(th);
+    let y = yc + hh * pw(sn, 2 / (sn > 0 ? o.n : o.nBot)) * k;
+    let z = o.half(x) * s * pw(c, 2 / o.n) * k;
+    const cv = o.carve?.(x, y, z);
+    if (cv) [y, z] = cv;
+    return new THREE.Vector3(x, y, z);
+  };
+  const S = o.stations, R = o.ring;
+  const pos = new Float32Array((S + 1) * (R + 1) * 3);
+  const grid: THREE.Vector3[][] = [];
+  for (let i = 0; i <= S; i++) {
+    const x = o.x0 + ((o.x1 - o.x0) * i) / S;
+    const row: THREE.Vector3[] = [];
+    for (let j = 0; j <= R; j++) {
+      const v = surf(x, -Math.PI / 2 + (j / R) * Math.PI * 2);
+      v.toArray(pos, (i * (R + 1) + j) * 3);
+      row.push(v);
+    }
+    grid.push(row);
+  }
+  const idx: number[] = [];
+  for (let i = 0; i < S; i++)
+    for (let j = 0; j < R; j++) {
+      const a = i * (R + 1) + j, b = a + R + 1, c = b + 1, d = a + 1;
+      idx.push(a, b, d, b, c, d);
+    }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setIndex(idx);
+  geo.computeVertexNormals();
+  return { geo, grid, surf };
+}
+
+// 로프트 격자에서 일정 간격의 가로·세로 선만 뽑아 홀로그램 와이어프레임을 만든다
+function cageLines(grid: THREE.Vector3[][], everyStation: number, everyRing: number) {
+  const pts: number[] = [];
+  for (let i = 0; i < grid.length; i += everyStation)
+    for (let j = 0; j < grid[i].length - 1; j++) pts.push(...grid[i][j].toArray(), ...grid[i][j + 1].toArray());
+  for (let j = 0; j < grid[0].length - 1; j += everyRing)
+    for (let i = 0; i < grid.length - 1; i++) pts.push(...grid[i][j].toArray(), ...grid[i + 1][j].toArray());
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+  return g;
+}
+
 interface Part {
   g: THREE.Group;
   base: THREE.Vector3;
@@ -134,6 +219,10 @@ export class Engine {
   private dust!: THREE.Points;
   private wordmark!: THREE.Mesh;
   private underGlow!: THREE.PointLight;
+  private key!: THREE.DirectionalLight;
+  private focusSpot!: THREE.SpotLight;
+  private holo = new THREE.Group();
+  private holoMats: THREE.Material[] = [];
 
   private labels: HTMLElement[] = [];
   private onResizeBound = () => this.resize();
@@ -221,7 +310,7 @@ export class Engine {
     const sc = this.scene;
     sc.add(new THREE.HemisphereLight('#9fbfff', '#05070c', 0.35));
 
-    const key = new THREE.DirectionalLight('#ffffff', 2.4);
+    const key = (this.key = new THREE.DirectionalLight('#ffffff', 2.4));
     key.position.set(4, 9, 5);
     key.castShadow = true;
     key.shadow.mapSize.set(this.mobile ? 1024 : 2048, this.mobile ? 1024 : 2048);
@@ -242,7 +331,7 @@ export class Engine {
     sc.add(fill);
 
     this.underGlow = new THREE.PointLight(SKY, 6, 5, 2);
-    this.underGlow.position.set(0, -0.75, 0);
+    this.underGlow.position.set(0, -0.88, 0);
     sc.add(this.underGlow);
 
     // 반사 바닥 (모바일은 성능상 생략)
@@ -259,7 +348,7 @@ export class Engine {
     // 반사 위를 덮는 반투명 짙은 바닥 → 광택 있는 검은 석재 느낌
     const tint = new THREE.Mesh(
       new THREE.PlaneGeometry(80, 80),
-      new THREE.MeshStandardMaterial({ color: '#04070e', metalness: 0.2, roughness: 0.55, transparent: true, opacity: this.mobile ? 1 : 0.86 })
+      new THREE.MeshStandardMaterial({ color: '#04070e', metalness: 0.2, roughness: 0.55, transparent: true, opacity: this.mobile ? 1 : 0.9 })
     );
     tint.rotation.x = -Math.PI / 2;
     tint.position.y = FLOOR_Y - 0.001;
@@ -387,67 +476,89 @@ export class Engine {
     const chrome = new THREE.MeshStandardMaterial({ color: '#d5deee', metalness: 1, roughness: 0.14 });
     const rubber = new THREE.MeshStandardMaterial({ color: '#07090d', metalness: 0.1, roughness: 0.85 });
 
-    /* 차체 셸 */
+    /* 차체 — 단면을 x축으로 이어 붙인(로프트) 하이퍼카 바디 */
     {
       const g = new THREE.Group();
-      const s = new THREE.Shape();
-      s.moveTo(-2.05, -0.32);
-      s.lineTo(2.0, -0.32);
-      s.quadraticCurveTo(2.26, -0.3, 2.22, -0.1);
-      s.quadraticCurveTo(1.9, 0.04, 1.15, 0.1);
-      s.quadraticCurveTo(0.55, 0.46, -0.25, 0.46);
-      s.quadraticCurveTo(-1.15, 0.46, -1.85, 0.16);
-      s.quadraticCurveTo(-2.14, 0.08, -2.1, -0.08);
-      s.lineTo(-2.05, -0.32);
-      const depth = 1.46;
-      const geo = new THREE.ExtrudeGeometry(s, { depth, bevelEnabled: true, bevelThickness: 0.16, bevelSize: 0.1, bevelSegments: 10, curveSegments: 40 });
-      geo.translate(0, 0, -depth / 2);
-      geo.computeVertexNormals();
+      const WHEEL_Y = -0.61;
+      const top = spline([[-2.34, -0.34], [-2.0, -0.2], [-1.45, -0.13], [-0.8, -0.17], [0.2, -0.22], [0.8, -0.27], [1.45, -0.27], [2.0, -0.4], [2.42, -0.56]]);
+      const bot = spline([[-2.34, -0.66], [-1.8, -0.78], [0, -0.81], [1.8, -0.79], [2.42, -0.7]]);
+      const half = spline([[-2.34, 0.7], [-1.95, 0.88], [-1.45, 0.97], [-0.8, 0.88], [0.1, 0.84], [0.9, 0.87], [1.45, 0.94], [2.0, 0.8], [2.42, 0.6]]);
+      // 휠 아치: 바퀴 주변 옆면을 안쪽으로 밀어 넣어 휠하우스를 만든다
+      const carve = (x: number, y: number, z: number): [number, number] | null => {
+        for (const wx of [1.45, -1.45]) {
+          const dx = x - wx, dy = y - WHEEL_Y;
+          if (dx * dx + dy * dy < 0.5 * 0.5 && Math.abs(z) > 0.6) return [y, Math.sign(z) * 0.6];
+        }
+        return null;
+      };
+      const body = loft({ x0: -2.34, x1: 2.42, cap0: 0.22, cap1: 0.36, top, bot, half, n: 2.8, nBot: 5, stations: 220, ring: 96, carve });
       this.paint = new THREE.MeshPhysicalMaterial({
         color: '#0a2f66',
         metalness: 0.78,
-        roughness: 0.24,
+        roughness: 0.22,
         clearcoat: 1,
-        clearcoatRoughness: 0.05,
-        iridescence: 0.35,
+        clearcoatRoughness: 0.04,
+        iridescence: 0.3,
         iridescenceIOR: 1.6,
         transparent: true,
-        envMapIntensity: 1.6,
+        envMapIntensity: 1.7,
       });
-      const shell = new THREE.Mesh(geo, this.paint);
-      g.add(shell);
+      g.add(new THREE.Mesh(body.geo, this.paint));
       this.rim = rimMat(SKY, 2.4, 0.9);
-      const rimMesh = new THREE.Mesh(geo, this.rim);
-      rimMesh.scale.setScalar(1.003);
+      const rimMesh = new THREE.Mesh(body.geo, this.rim);
+      rimMesh.scale.setScalar(1.004);
       g.add(rimMesh);
+      // X-RAY 때 보이는 홀로그램 격자
       this.edgeMat = new THREE.LineBasicMaterial({ color: SKY.clone().multiplyScalar(2.2), transparent: true, opacity: 0, toneMapped: false });
-      g.add(new THREE.LineSegments(new THREE.EdgesGeometry(geo, 24), this.edgeMat));
+      g.add(new THREE.LineSegments(cageLines(body.grid, 11, 8), this.edgeMat));
 
-      // 캐노피 유리
-      const c = new THREE.Shape();
-      c.moveTo(1.1, 0.12);
-      c.quadraticCurveTo(0.55, 0.58, -0.25, 0.6);
-      c.quadraticCurveTo(-0.95, 0.6, -1.45, 0.27);
-      c.lineTo(1.1, 0.12);
-      const cg = new THREE.ExtrudeGeometry(c, { depth: 1.04, bevelEnabled: true, bevelThickness: 0.1, bevelSize: 0.06, bevelSegments: 8, curveSegments: 32 });
-      cg.translate(0, 0, -0.52);
-      this.glass = new THREE.MeshPhysicalMaterial({ color: '#081426', metalness: 0.3, roughness: 0.02, clearcoat: 1, transparent: true, opacity: 0.82, envMapIntensity: 2.6 });
-      g.add(new THREE.Mesh(cg, this.glass));
+      // 캐노피(그린하우스) — 차체보다 좁고 둥근 단면
+      const cTop = spline([[-1.3, -0.2], [-0.9, -0.04], [-0.35, 0.07], [0.15, 0.08], [0.6, -0.02], [1.05, -0.24]]);
+      const cBot = (x: number) => top(x) - 0.14;
+      const cHalf = spline([[-1.3, 0.48], [-0.4, 0.66], [0.4, 0.66], [1.05, 0.56]]);
+      const canopy = loft({ x0: -1.3, x1: 1.05, cap0: 0.3, cap1: 0.45, top: cTop, bot: cBot, half: cHalf, n: 2.3, nBot: 2.3, stations: 120, ring: 72 });
+      this.glass = new THREE.MeshPhysicalMaterial({ color: '#06101f', metalness: 0.35, roughness: 0.02, clearcoat: 1, transparent: true, opacity: 0.85, envMapIntensity: 2.8 });
+      g.add(new THREE.Mesh(canopy.geo, this.glass));
 
-      // 발광 라인: 헤드라이트 · 테일 · 숄더 라인
-      const head = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.035, 1.3), glow(SKY, 7));
-      head.position.set(2.31, -0.12, 0);
-      const tail = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.03, 1.4), glow('#ff4f7b', 5));
-      tail.position.set(-2.22, 0.02, 0);
-      g.add(head, tail);
-      for (const side of [-1, 1]) {
-        const curve = new THREE.CatmullRomCurve3([
-          new THREE.Vector3(2.15, -0.16, side * 0.895),
-          new THREE.Vector3(1.2, 0.0, side * 0.895),
-          new THREE.Vector3(-0.4, 0.03, side * 0.895),
-          new THREE.Vector3(-2.0, 0.04, side * 0.895),
-        ]);
-        g.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 64, 0.007, 6), glow(SKY, 3.5)));
+      // 발광 라인 — 차체 표면을 그대로 따라가게 표면 함수에서 뽑는다
+      const surf = body.surf;
+      const wrap = (xs: number[], th: number) => {
+        const right = xs.map((x) => surf(x, th, 1.012));
+        const left = xs.map((x) => surf(x, Math.PI - th, 1.012)).reverse();
+        return new THREE.CatmullRomCurve3([...left, ...right]);
+      };
+      const headXs = Array.from({ length: 18 }, (_, i) => 2.1 + (i / 17) * 0.315);
+      g.add(new THREE.Mesh(new THREE.TubeGeometry(wrap(headXs.slice().reverse(), 0.42), 120, 0.012, 8), glow(SKY, 7)));
+      const tailXs = Array.from({ length: 18 }, (_, i) => -2.32 + (i / 17) * 0.22);
+      g.add(new THREE.Mesh(new THREE.TubeGeometry(wrap(tailXs, 0.5), 120, 0.011, 8), glow('#ff4f7b', 5)));
+      for (const side of [1, -1]) {
+        const pts = Array.from({ length: 40 }, (_, i) => {
+          const p = surf(-1.95 + (i / 39) * 3.9, side > 0 ? 0.2 : Math.PI - 0.2, 1.01);
+          return p;
+        });
+        g.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 160, 0.005, 6), glow(SKY, 3)));
+      }
+      // 리어 윙 · 프런트 스플리터 · 디퓨저
+      const carbon = new THREE.MeshStandardMaterial({ color: '#0a0e16', metalness: 0.6, roughness: 0.35 });
+      const wing = new THREE.Mesh(new RoundedBoxGeometry(0.34, 0.025, 1.62, 2, 0.01), carbon);
+      wing.position.set(-2.02, 0.02, 0);
+      wing.rotation.z = 0.08;
+      const wingLine = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.012, 1.6), glow(SKY, 4));
+      wingLine.position.set(-2.18, 0.03, 0);
+      g.add(wing, wingLine);
+      for (const z of [-0.45, 0.45]) {
+        const strut = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.2, 0.02), carbon);
+        strut.position.set(-1.98, -0.08, z);
+        strut.rotation.z = -0.2;
+        g.add(strut);
+      }
+      const splitter = new THREE.Mesh(new RoundedBoxGeometry(0.3, 0.02, 1.3, 2, 0.008), carbon);
+      splitter.position.set(2.2, -0.78, 0);
+      g.add(splitter);
+      for (let i = 0; i < 6; i++) {
+        const fin = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.1, 0.012), carbon);
+        fin.position.set(-2.12, -0.74, -0.5 + i * 0.2);
+        g.add(fin);
       }
       g.traverse((o) => {
         const m = (o as THREE.Mesh).material as THREE.MeshBasicMaterial;
@@ -456,57 +567,58 @@ export class Engine {
           this.bodyGlows.push(m);
         }
       });
-      this.body = this.addPart(g, [0, 0, 0], [0, 1.55, 0], 0.0, [0.8, 0.5, 0.9]);
+      this.body = this.addPart(g, [0, 0, 0], [-0.15, 2.05, 0], 0.0, [0.9, -0.15, 0.85]);
     }
 
     /* 01 배터리 팩 */
     {
       const g = new THREE.Group();
-      g.add(new THREE.Mesh(new RoundedBoxGeometry(3.1, 0.12, 1.5, 3, 0.035), dark));
-      const nx = 15, nz = 7;
-      this.cells = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.06, 0.06, 0.085, 16), new THREE.MeshBasicMaterial({ toneMapped: false }), nx * nz);
+      g.add(new THREE.Mesh(new RoundedBoxGeometry(2.7, 0.1, 1.2, 3, 0.03), dark));
+      const nx = 14, nz = 6;
+      this.cells = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.055, 0.055, 0.08, 16), new THREE.MeshBasicMaterial({ toneMapped: false }), nx * nz);
       const m = new THREE.Matrix4();
       let k = 0;
       for (let i = 0; i < nx; i++)
         for (let j = 0; j < nz; j++) {
-          m.makeTranslation((i - (nx - 1) / 2) * 0.19, 0.1, (j - (nz - 1) / 2) * 0.19);
+          m.makeTranslation((i - (nx - 1) / 2) * 0.18, 0.09, (j - (nz - 1) / 2) * 0.18);
           this.cells.setMatrixAt(k, m);
           this.cells.setColorAt(k++, SKY);
         }
       g.add(this.cells);
       this.lid = new THREE.Mesh(
-        new RoundedBoxGeometry(3.1, 0.03, 1.5, 2, 0.012),
+        new RoundedBoxGeometry(2.7, 0.025, 1.2, 2, 0.01),
         new THREE.MeshPhysicalMaterial({ color: '#9fc4ff', metalness: 0, roughness: 0.05, transparent: true, opacity: 0.18, envMapIntensity: 2 })
       );
-      this.lid.position.y = 0.17;
+      this.lid.position.y = 0.15;
       g.add(this.lid);
-      this.battery = this.addPart(g, [0, -0.52, 0], [0, -0.3, 0], 0.1, [0.9, 0.15, 0.55]);
+      this.battery = this.addPart(g, [0.05, -0.71, 0], [-0.2, -0.13, -0.6], 0.1, [-0.7, 0.12, -0.35]);
     }
 
     /* 02 라이다 */
     {
       const g = new THREE.Group();
-      g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.23, 0.08, 48), dark));
+      g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.19, 0.07, 48), dark));
       const dome = new THREE.Mesh(
-        new THREE.SphereGeometry(0.17, 48, 24, 0, Math.PI * 2, 0, Math.PI / 2),
+        new THREE.SphereGeometry(0.14, 48, 24, 0, Math.PI * 2, 0, Math.PI / 2),
         new THREE.MeshPhysicalMaterial({ color: '#0d1d36', metalness: 0.2, roughness: 0.02, transparent: true, opacity: 0.55, envMapIntensity: 3 })
       );
-      dome.position.y = 0.04;
+      dome.position.y = 0.035;
       g.add(dome);
       this.lidarSpin = new THREE.Group();
-      this.lidarSpin.position.y = 0.09;
-      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.008, 8, 48), glow(SKY, 5));
+      this.lidarSpin.position.y = 0.08;
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.095, 0.007, 8, 48), glow(SKY, 5));
       ring.rotation.x = Math.PI / 2;
-      const emitter = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.03, 0.02), glow('#ffffff', 8));
-      emitter.position.x = 0.1;
+      const emitter = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.025, 0.02), glow('#ffffff', 8));
+      emitter.position.x = 0.085;
       this.lidarSpin.add(ring, emitter);
       g.add(this.lidarSpin);
-      this.lidar = this.addPart(g, [-0.2, 0.67, 0], [0, 2.0, 0], 0.2, [0, 0.12, 0]);
+      this.lidar = this.addPart(g, [-0.15, 0.1, 0], [0.05, 3.0, -0.2], 0.2, [0, 0.1, 0]);
     }
 
     /* 03 모터 + 인버터 */
     {
       const g = new THREE.Group();
+      g.scale.setScalar(0.78);
       const housing = new THREE.Mesh(
         new THREE.CylinderGeometry(0.27, 0.27, 0.64, 48, 1, true),
         new THREE.MeshPhysicalMaterial({ color: '#b9c6dc', metalness: 1, roughness: 0.2, transparent: true, opacity: 0.35, side: THREE.DoubleSide })
@@ -537,7 +649,6 @@ export class Engine {
       const strip = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.012, 0.02), glow(SKY, 5));
       strip.position.set(0.12, 0.42, 0.15);
       g.add(inv, strip);
-      // 플라즈마 스파크
       const n = 260;
       const sg = new THREE.BufferGeometry();
       sg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 3), 3).setUsage(THREE.DynamicDrawUsage));
@@ -546,35 +657,38 @@ export class Engine {
         new THREE.PointsMaterial({ size: 0.05, map: dotTexture(), color: SKY.clone().multiplyScalar(4), transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false })
       );
       g.add(this.sparks);
-      this.motor = this.addPart(g, [-1.45, -0.55, 0], [-1.25, 0.35, 0], 0.15, [0, 0.36, 0.2]);
+      this.motor = this.addPart(g, [-1.45, -0.58, 0], [-2.2, 0.55, -0.2], 0.15, [0, 0.36, 0.2]);
     }
 
     /* 04 콕핏 + 뇌파 신경망 */
     {
       const g = new THREE.Group();
-      const leather = new THREE.MeshStandardMaterial({ color: '#151c2a', metalness: 0.2, roughness: 0.62 });
-      const cushion = new THREE.Mesh(new RoundedBoxGeometry(0.5, 0.1, 0.5, 3, 0.04), leather);
-      const back = new THREE.Mesh(new RoundedBoxGeometry(0.1, 0.62, 0.5, 3, 0.04), leather);
-      back.position.set(-0.28, 0.3, 0);
-      back.rotation.z = 0.25;
-      const headrest = new THREE.Mesh(new RoundedBoxGeometry(0.09, 0.16, 0.3, 3, 0.035), leather);
-      headrest.position.set(-0.37, 0.67, 0);
-      headrest.rotation.z = 0.25;
-      const yoke = new THREE.Mesh(new THREE.TorusGeometry(0.15, 0.018, 12, 48, Math.PI * 1.3), chrome);
-      yoke.position.set(0.58, 0.32, 0);
+      const leather = new THREE.MeshStandardMaterial({ color: '#1a2233', metalness: 0.2, roughness: 0.6 });
+      const cushion = new THREE.Mesh(new RoundedBoxGeometry(0.42, 0.08, 0.42, 3, 0.035), leather);
+      const back = new THREE.Mesh(new RoundedBoxGeometry(0.08, 0.5, 0.42, 3, 0.035), leather);
+      back.position.set(-0.24, 0.24, 0);
+      back.rotation.z = 0.3;
+      const headrest = new THREE.Mesh(new RoundedBoxGeometry(0.08, 0.14, 0.26, 3, 0.03), leather);
+      headrest.position.set(-0.33, 0.55, 0);
+      headrest.rotation.z = 0.3;
+      const stitch = new THREE.Mesh(new THREE.BoxGeometry(0.005, 0.44, 0.012), glow(SKY, 3));
+      stitch.position.set(-0.195, 0.24, 0);
+      stitch.rotation.z = 0.3;
+      const yoke = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.016, 12, 48, Math.PI * 1.3), chrome);
+      yoke.position.set(0.5, 0.24, 0);
       yoke.rotation.set(0, Math.PI / 2, -Math.PI * 0.15 - Math.PI / 2);
-      g.add(cushion, back, headrest, yoke);
+      g.add(cushion, back, headrest, stitch, yoke);
 
-      const center = new THREE.Vector3(-0.33, 0.78, 0);
+      const center = new THREE.Vector3(-0.3, 0.64, 0);
       const N = 70;
       const nodes: THREE.Vector3[] = [];
       while (nodes.length < N) {
         const v = new THREE.Vector3(Math.random() * 2 - 1, Math.random() * 2 - 1, Math.random() * 2 - 1);
         if (v.length() > 1 || v.length() < 0.55) continue;
-        nodes.push(v.multiply(new THREE.Vector3(0.36, 0.3, 0.42)).add(center));
+        nodes.push(v.multiply(new THREE.Vector3(0.32, 0.26, 0.36)).add(center));
       }
       const pairs: [number, number][] = [];
-      for (let i = 0; i < N; i++) for (let j = i + 1; j < N; j++) if (nodes[i].distanceTo(nodes[j]) < 0.2) pairs.push([i, j]);
+      for (let i = 0; i < N; i++) for (let j = i + 1; j < N; j++) if (nodes[i].distanceTo(nodes[j]) < 0.18) pairs.push([i, j]);
       const pg = new THREE.BufferGeometry().setFromPoints(nodes);
       pg.setAttribute('color', new THREE.BufferAttribute(new Float32Array(N * 3), 3));
       const pts = new THREE.Points(pg, new THREE.PointsMaterial({ size: 0.045, map: dotTexture(), vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }));
@@ -589,31 +703,48 @@ export class Engine {
       const lines = new THREE.LineSegments(lg, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }));
       g.add(pts, lines);
       this.neural = { pts, lines, pairs, phase: nodes.map(() => Math.random() * Math.PI * 2) };
-      this.cockpit = this.addPart(g, [0.25, -0.3, 0], [0.1, 0.85, 0], 0.25, [-0.33, 0.78, 0]);
+      this.cockpit = this.addPart(g, [0.05, -0.68, 0], [1.45, 1.4, 0.55], 0.25, [-0.3, 0.64, 0]);
     }
 
     /* 05 휠 + 로보틱 서스펜션 */
+    const caliperMat = glow(SKY, 2.2);
     for (const [x, side] of [[1.45, 1], [1.45, -1], [-1.45, 1], [-1.45, -1]] as const) {
       const g = new THREE.Group();
-      const tire = new THREE.Mesh(new THREE.TorusGeometry(0.33, 0.12, 32, 72), rubber);
-      const rimDisc = new THREE.Mesh(new THREE.CylinderGeometry(0.255, 0.255, 0.1, 48), chrome);
-      rimDisc.rotation.x = Math.PI / 2;
       const spin = new THREE.Group();
+      const tire = new THREE.Mesh(new THREE.TorusGeometry(0.3, 0.088, 32, 80), rubber);
+      tire.scale.z = 1.55;
+      const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.26, 0.24, 48, 1, true), dark);
+      barrel.rotation.x = Math.PI / 2;
+      const lip = new THREE.Mesh(new THREE.TorusGeometry(0.255, 0.012, 8, 64), chrome);
+      lip.position.z = side * 0.115;
+      // 트윈 Y 스포크
       for (let i = 0; i < 5; i++) {
-        const sp = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.46, 0.04), dark);
-        sp.rotation.z = (i / 5) * Math.PI * 2;
-        sp.position.z = side * 0.06;
-        spin.add(sp);
+        for (const d of [-0.11, 0.11]) {
+          const sp = new THREE.Mesh(new THREE.BoxGeometry(0.026, 0.25, 0.03), chrome);
+          sp.position.set(0, 0.125, side * 0.1);
+          const arm = new THREE.Group();
+          arm.rotation.z = (i / 5) * Math.PI * 2 + d;
+          arm.add(sp);
+          spin.add(arm);
+        }
       }
-      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.235, 0.006, 6, 64), glow(SKY, 4));
-      ring.position.z = side * 0.065;
-      const hub = new THREE.Mesh(new THREE.CircleGeometry(0.045, 24), glow(SKY, 6));
-      hub.position.z = side * 0.09;
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.235, 0.005, 6, 64), glow(SKY, 4));
+      ring.position.z = side * 0.112;
+      const hub = new THREE.Mesh(new THREE.CircleGeometry(0.04, 24), glow(SKY, 3));
+      hub.position.z = side * 0.125;
       if (side < 0) hub.rotation.y = Math.PI;
-      spin.add(tire, rimDisc, ring, hub);
+      spin.add(tire, barrel, lip, ring, hub);
       g.add(spin);
+      // 브레이크 디스크 + 캘리퍼 (회전하지 않음)
+      const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.19, 0.018, 48), chrome);
+      disc.rotation.x = Math.PI / 2;
+      disc.position.z = side * 0.02;
+      const caliper = new THREE.Mesh(new RoundedBoxGeometry(0.16, 0.07, 0.06, 2, 0.02), caliperMat);
+      caliper.position.set(0.1, 0.13, side * 0.05);
+      caliper.rotation.z = -0.6;
+      g.add(disc, caliper);
       g.userData.spin = spin;
-      g.position.set(x, -0.58, side * 1.02);
+      g.position.set(x, WHEEL_Y_ALL, side * 0.8);
       g.traverse((o) => {
         if ((o as THREE.Mesh).isMesh) o.castShadow = true;
       });
@@ -621,24 +752,24 @@ export class Engine {
       this.wheels.push({ g, base: g.position.clone(), side });
 
       const arms = [0, 1].map((k) => {
-        const a = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.04, 1), chrome);
-        a.position.set(x, k ? -0.47 : -0.66, 0);
+        const a = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.035, 1), chrome);
+        a.position.set(x, k ? WHEEL_Y_ALL + 0.1 : WHEEL_Y_ALL - 0.08, 0);
         a.castShadow = true;
         this.car.add(a);
         return a;
       });
       const helix = new THREE.Curve<THREE.Vector3>();
-      helix.getPoint = (t: number, target = new THREE.Vector3()) => target.set(Math.cos(t * Math.PI * 14) * 0.055, t * 0.32 - 0.16, Math.sin(t * Math.PI * 14) * 0.055);
-      const spring = new THREE.Mesh(new THREE.TubeGeometry(helix, 160, 0.011, 6), chrome);
-      const piston = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.36, 12), glow(SKY, 3));
+      helix.getPoint = (t: number, target = new THREE.Vector3()) => target.set(Math.cos(t * Math.PI * 14) * 0.05, t * 0.28 - 0.14, Math.sin(t * Math.PI * 14) * 0.05);
+      const spring = new THREE.Mesh(new THREE.TubeGeometry(helix, 160, 0.01, 6), chrome);
+      const piston = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.32, 12), glow(SKY, 3));
       this.car.add(spring, piston);
       this.susp.push({ arms, spring, piston, wheel: this.wheels.length - 1 });
     }
     // 휠은 Part 배열 대신 따로 관리하지만, 라벨용 앵커는 앞바퀴에 둔다
     const wa = new THREE.Object3D();
-    wa.position.set(0, 0.45, 0);
+    wa.position.set(0, 0.42, 0);
     this.wheels[0].g.add(wa);
-    this.parts.push({ g: this.wheels[0].g, base: this.wheels[0].base, off: new THREE.Vector3(), delay: 0.3, anchor: wa });
+    this.parts.push({ g: this.wheels[0].g, base: this.wheels[0].base, off: new THREE.Vector3(0.35, 0, 1.1), delay: 0.3, anchor: wa });
   }
 
   /* ───────────────────────── 이펙트: 라이다 스캔·에너지 흐름·부스터·속도선 ───────────────────────── */
@@ -735,7 +866,7 @@ export class Engine {
     for (const z of [-0.42, 0.42]) {
       const m = new THREE.Mesh(new THREE.ConeGeometry(0.16, 2.4, 32, 8, true), flame);
       m.rotation.z = Math.PI / 2;
-      m.position.set(-2.25 - 1.2, -0.08, z);
+      m.position.set(-2.34 - 1.2, -0.5, z * 0.85);
       this.car.add(m);
       this.boosters.push(m);
     }
@@ -753,6 +884,45 @@ export class Engine {
     }
     this.streaks.frustumCulled = false;
     this.scene.add(this.streaks);
+
+    // 클로즈업한 부품만 비추는 스포트라이트 + 바닥 홀로그램 받침
+    this.focusSpot = new THREE.SpotLight('#dbe8ff', 0, 14, 0.38, 0.55, 1.4);
+    this.scene.add(this.focusSpot, this.focusSpot.target);
+    const ringM = glow(SKY, 3, 1);
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.97, 1, 128), ringM);
+    const ring2M = glow(SKY, 2, 1);
+    const ring2 = new THREE.Mesh(new THREE.RingGeometry(0.7, 0.71, 128, 1, 0, Math.PI * 1.4), ring2M);
+    const discM = new THREE.ShaderMaterial({
+      uniforms: { uColor: { value: SKY.clone() }, uA: { value: 0 } },
+      vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+      fragmentShader: `uniform vec3 uColor; uniform float uA; varying vec2 vUv; void main(){ float r = length(vUv-0.5)*2.0; float a = smoothstep(1.0, 0.0, r)*0.35*uA; gl_FragColor = vec4(uColor*a*2.0, a); }`,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    const disc = new THREE.Mesh(new THREE.CircleGeometry(1, 64), discM);
+    const tickPts: number[] = [];
+    for (let i = 0; i < 72; i++) {
+      const a = (i / 72) * Math.PI * 2, r0 = i % 6 ? 1.04 : 1.02, r1 = i % 6 ? 1.08 : 1.16;
+      tickPts.push(Math.cos(a) * r0, Math.sin(a) * r0, 0, Math.cos(a) * r1, Math.sin(a) * r1, 0);
+    }
+    const tickG = new THREE.BufferGeometry();
+    tickG.setAttribute('position', new THREE.Float32BufferAttribute(tickPts, 3));
+    const tickM = new THREE.LineBasicMaterial({ color: SKY.clone().multiplyScalar(2), transparent: true, toneMapped: false });
+    const ticks = new THREE.LineSegments(tickG, tickM);
+    [ringM, ring2M, tickM].forEach((m) => {
+      m.transparent = true;
+      m.depthWrite = false;
+      (m as THREE.MeshBasicMaterial).side = THREE.DoubleSide;
+    });
+    this.holoMats = [ringM, ring2M, tickM, discM];
+    const spinner = new THREE.Group();
+    spinner.add(ring2, ticks);
+    this.holo.add(disc, ring, spinner);
+    this.holo.userData.spinner = spinner;
+    this.holo.rotation.x = -Math.PI / 2;
+    this.holo.visible = false;
+    this.scene.add(this.holo);
   }
 
   /* ───────────────────────── 캠퍼스: 서울 · ERICA 3D 맵 ───────────────────────── */
@@ -840,16 +1010,22 @@ export class Engine {
 
     /* 분해 */
     const e = S.explode;
+    const fa = S.focus >= 0 ? easeOut3(S.focusAmt) : 0;
     this.parts.forEach((p, i) => {
       if (p.g === this.wheels[0].g) return;
       const ei = easeOut3(smooth(p.delay, p.delay + 0.6, e));
-      p.g.position.copy(p.base).addScaledVector(p.off, ei);
+      const lift = i - 1 === S.focus ? fa : 0; // 클로즈업한 부품은 무리에서 한 발 더 나와 천천히 돈다
+      if (p.g.userData.s0 === undefined) p.g.userData.s0 = p.g.scale.x;
+      p.g.position.copy(p.base).addScaledVector(p.off, ei).addScaledVector(p.off.clone().normalize(), 0.5 * lift);
       p.g.position.y += Math.sin(t * 1.2 + i * 1.7) * 0.035 * ei;
       p.g.rotation.z = Math.sin(t * 0.7 + i) * 0.03 * ei;
+      p.g.rotation.y = Math.sin(t * 0.5) * (i === 1 ? 0.25 : 0.6) * lift;
+      p.g.scale.setScalar(p.g.userData.s0 * (1 + 0.12 * lift));
     });
     const we = easeOut3(smooth(0.3, 0.9, e));
     this.wheels.forEach((w) => {
-      w.g.position.set(w.base.x, w.base.y + Math.sin(t * 1.1 + w.base.x) * 0.03 * we, w.side * (1.02 + 1.0 * we));
+      const wl = w === this.wheels[0] && S.focus === 4 ? fa : 0;
+      w.g.position.set(w.base.x + Math.sign(w.base.x) * (0.35 * we + 0.3 * wl), w.base.y + Math.sin(t * 1.1 + w.base.x) * 0.03 * we + 0.12 * wl, w.base.z + w.side * (1.1 * we + 0.45 * wl));
       const spinRate = 2 + S.launch * 60 + S.finale * 6 + (S.focus === 4 ? S.focusAmt * 3 : 0);
       (w.g.userData.spin as THREE.Group).rotation.z -= dt * spinRate;
     });
@@ -863,9 +1039,10 @@ export class Engine {
         a.position.z = mid;
       });
       const comp = Math.sin(t * 3.2 + w.x) * 0.04 * (0.3 + we);
-      s.spring.position.set(w.x, -0.42 + comp, mid);
+      s.spring.position.set(w.x, w.y + 0.2 + comp, mid);
       s.spring.scale.y = 1 + comp * 2;
-      s.piston.position.set(w.x, -0.42 + comp, mid);
+      s.piston.position.set(w.x, w.y + 0.2 + comp, mid);
+      s.arms.forEach((a) => (a.position.x = w.x));
     });
 
     /* X-RAY 재질 */
@@ -874,7 +1051,7 @@ export class Engine {
     this.paint.opacity = lerp(1, 0.14, xr) * (1 - fq * 0.65);
     this.paint.depthWrite = xr < 0.5;
     this.glass.opacity = lerp(0.82, 0.1, xr);
-    this.edgeMat.opacity = xr * 0.85 * (1 - fq * 0.6);
+    this.edgeMat.opacity = xr * 0.85 * (1 - fq * 0.92);
     this.bodyGlows.forEach((m) => (m.opacity = 1 - fq * 0.85));
     this.rim.uniforms.uK.value = lerp(0.9, 1.8, xr) * (1 - fq * 0.8);
 
@@ -882,7 +1059,7 @@ export class Engine {
 
     // 배터리 셀 에너지 파동
     const c = new THREE.Color();
-    const cellBoost = 0.45 + e * 0.5 + focusOn(0) * 0.6;
+    const cellBoost = (0.45 + e * 0.5) * (1 - focusOn(0) * 0.45);
     for (let i = 0; i < this.cells.count; i++) {
       const ix = Math.floor(i / 7);
       const w = Math.pow(0.5 + 0.5 * Math.sin(ix * 0.7 - t * 4), 6);
@@ -890,7 +1067,7 @@ export class Engine {
       this.cells.setColorAt(i, c);
     }
     this.cells.instanceColor!.needsUpdate = true;
-    this.lid.position.y = 0.17 + focusOn(0) * 0.35;
+    this.lid.position.y = 0.15 + focusOn(0) * 0.3;
 
     // 라이다
     this.lidarSpin.rotation.y += dt * (6 + focusOn(1) * 10);
@@ -931,7 +1108,7 @@ export class Engine {
     // 에너지 흐름
     {
       const src = this.battery.g.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, 0.12, 0));
-      const amt = carVisible ? e * (1 - S.launch) : 0;
+      const amt = carVisible ? e * (1 - S.launch) * (1 - 0.6 * fa) : 0;
       const pp = this.flow.geometry.attributes.position as THREE.BufferAttribute;
       const pa = this.flow.geometry.attributes.aA as THREE.BufferAttribute;
       const lp = this.flowLines.geometry.attributes.position as THREE.BufferAttribute;
@@ -988,7 +1165,7 @@ export class Engine {
       });
       this.streaks.instanceMatrix.needsUpdate = true;
     }
-    this.underGlow.intensity = carVisible ? 1.5 + e * 3 + boost * 14 : 0;
+    this.underGlow.intensity = carVisible ? 0.5 + e * 2 + boost * 12 : 0;
     this.underGlow.position.x = carX;
 
     /* 캠퍼스 */
@@ -1032,23 +1209,47 @@ export class Engine {
     gm.uniforms.uPulse.value = 0.4 + e * 0.6;
     (this.wordmark.material as THREE.MeshBasicMaterial).opacity = S.hero * 0.85;
 
+    /* 클로즈업 무대: 스포트라이트 · 홀로그램 받침 · 주변 조명 낮춤 */
+    if (S.focus >= 0 && fa > 0.001 && carVisible) {
+      const fpart = this.parts[S.focus + 1];
+      const gp = fpart.g.getWorldPosition(new THREE.Vector3());
+      const drop = [0.08, 0.06, 0.32, 0.08, 0.42][S.focus];
+      const size = [1.75, 0.38, 0.55, 0.6, 0.62][S.focus];
+      this.holo.visible = true;
+      this.holo.position.set(gp.x, gp.y - drop, gp.z);
+      this.holo.scale.setScalar(size * (0.85 + 0.15 * fa));
+      (this.holo.userData.spinner as THREE.Group).rotation.z = t * 0.6;
+      this.holoMats.forEach((m) => {
+        if ((m as THREE.ShaderMaterial).uniforms) (m as THREE.ShaderMaterial).uniforms.uA.value = fa;
+        else m.opacity = fa;
+      });
+      this.focusSpot.intensity = [18, 40, 40, 40, 26][S.focus] * fa;
+      this.focusSpot.position.copy(gp).add(new THREE.Vector3(0.8, 3.2, 1.6));
+      this.focusSpot.target.position.copy(gp);
+    } else {
+      this.holo.visible = false;
+      this.focusSpot.intensity = 0;
+    }
+    this.key.intensity = 2.4 * (1 - 0.5 * fa);
+    this.scene.environmentIntensity = 0.55 * (1 - 0.45 * fa);
+
     /* 카메라 */
-    const pos = new THREE.Vector3(6.6, 1.55, 7.9);
-    const tgt = new THREE.Vector3(0, -0.15, 0);
+    const pos = new THREE.Vector3(6.6, 1.15, 7.9);
+    const tgt = new THREE.Vector3(0, -0.42, 0);
     let fov = 36;
-    pos.lerp(new THREE.Vector3(7.8, 4.6, 10.2), smooth(0, 0.6, e));
-    tgt.lerp(new THREE.Vector3(0, 0.5, 0), smooth(0, 0.6, e));
+    pos.lerp(new THREE.Vector3(7.4, 3.8, 10.0), smooth(0, 0.6, e));
+    tgt.lerp(new THREE.Vector3(-0.3, 0.4, 0.2), smooth(0, 0.6, e));
     fov = lerp(fov, 40, smooth(0, 0.6, e));
     if (S.focus >= 0 && S.focusAmt > 0) {
       const fp = this.parts[S.focus + 1].anchor.getWorldPosition(new THREE.Vector3());
       const dirs = [
-        new THREE.Vector3(0.6, 0.7, 1.1),
-        new THREE.Vector3(0.9, 0.55, 1.0),
-        new THREE.Vector3(-0.9, 0.35, 1.1),
-        new THREE.Vector3(0.85, -0.12, 1.0),
-        new THREE.Vector3(0.5, 0.25, 1.2),
+        new THREE.Vector3(0.75, 0.5, 1.0),
+        new THREE.Vector3(0.9, 0.45, 1.0),
+        new THREE.Vector3(-0.8, 0.35, 1.1),
+        new THREE.Vector3(0.9, 0.3, 1.0),
+        new THREE.Vector3(0.55, 0.25, 1.2),
       ];
-      const dist = [4.8, 4.0, 4.2, 3.6, 4.0][S.focus];
+      const dist = [5.6, 2.6, 3.2, 3.0, 3.0][S.focus];
       const fpos = fp.clone().addScaledVector(dirs[S.focus].normalize(), dist);
       const k = easeOut3(S.focusAmt);
       pos.lerp(fpos, k);
@@ -1056,8 +1257,8 @@ export class Engine {
       fov = lerp(fov, 34, k);
     }
     const lk = smooth(0, 0.3, S.launch);
-    pos.lerp(new THREE.Vector3(-3.4 + carX * 0.15, 0.25, 5.2), lk);
-    tgt.lerp(new THREE.Vector3(carX + 1.5, -0.1, 0), lk);
+    pos.lerp(new THREE.Vector3(-3.4 + carX * 0.15, -0.05, 5.2), lk);
+    tgt.lerp(new THREE.Vector3(carX + 1.5, -0.42, 0), lk);
     fov = lerp(fov, 58, smooth(0.05, 0.6, S.launch) * (1 - smooth(0.9, 1, S.launch)));
     const ck = smooth(0, 0.5, S.campus);
     const orbit = t * 0.04;
@@ -1065,8 +1266,8 @@ export class Engine {
     tgt.lerp(new THREE.Vector3(0, 0, 0), ck);
     fov = lerp(fov, 42, ck);
     const fk = smooth(0, 0.8, S.finale);
-    pos.lerp(new THREE.Vector3(5.6, 1.1, 7.0), fk);
-    tgt.lerp(new THREE.Vector3(carX * 0.3, 0, 0), fk);
+    pos.lerp(new THREE.Vector3(5.6, 0.8, 7.0), fk);
+    tgt.lerp(new THREE.Vector3(carX * 0.3, -0.35, 0), fk);
     fov = lerp(fov, 34, fk);
 
     if (portrait) {
@@ -1092,7 +1293,7 @@ export class Engine {
     if (portrait) {
       sy = lerp(0.1, 0.16, smooth(0, 0.5, e)) * (1 - ck) * (1 - fk) - fk * 0.08;
     } else {
-      sx = lerp(0.12, 0.16, smooth(0, 0.5, e));
+      sx = lerp(0.12, 0.13, smooth(0, 0.5, e));
       sx = lerp(sx, -0.19, S.focus >= 0 ? easeOut3(S.focusAmt) : 0);
       sx = lerp(sx, 0.04, lk);
       sx = lerp(sx, -0.17, ck);
@@ -1125,7 +1326,10 @@ export class Engine {
       const a = behind ? 0 : alpha;
       el.style.opacity = a.toFixed(3);
       el.style.visibility = a < 0.01 ? 'hidden' : 'visible';
-      if (a >= 0.01) el.style.transform = `translate3d(${((v.x * 0.5 + 0.5) * w).toFixed(1)}px, ${((-v.y * 0.5 + 0.5) * h).toFixed(1)}px, 0)`;
+      // tag--left 라벨은 점 왼쪽으로 글씨를 붙인다 (이웃 라벨과 겹치지 않게)
+      const dx = el.classList.contains('tag--left') ? el.offsetWidth : 0;
+      const px = Math.min(Math.max((v.x * 0.5 + 0.5) * w - dx, 6), w - el.offsetWidth - 6); // 화면 밖으로 잘리지 않게
+      if (a >= 0.01) el.style.transform = `translate3d(${px.toFixed(1)}px, ${((-v.y * 0.5 + 0.5) * h).toFixed(1)}px, 0)`;
     };
     const partAlpha = carVisible ? smooth(0.55, 0.9, e) * (1 - S.launch) : 0;
     for (let i = 0; i < 5; i++) {
