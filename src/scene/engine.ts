@@ -289,6 +289,12 @@ export class Engine {
     this.raf = requestAnimationFrame(this.tick);
   }
 
+  private paused = false;
+  // 밝은(불투명) 섹션이 화면을 덮고 있을 땐 렌더링을 쉰다
+  setPaused(p: boolean) {
+    this.paused = p;
+  }
+
   setState(s: Partial<EngineState>) {
     Object.assign(this.s, s);
   }
@@ -449,6 +455,7 @@ export class Engine {
       new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, toneMapped: false, fog: false })
     );
     this.wordmark.position.set(2.5, 1.2, -9);
+    this.wordmark.visible = false;
     sc.add(this.wordmark);
   }
 
@@ -980,6 +987,7 @@ export class Engine {
   private tick = () => {
     this.raf = requestAnimationFrame(this.tick);
     this.timer.update();
+    if (this.paused) return;
     const dt = Math.min(this.timer.getDelta(), 0.05);
     this.time += dt;
     const t = this.time;
@@ -1014,18 +1022,25 @@ export class Engine {
     this.parts.forEach((p, i) => {
       if (p.g === this.wheels[0].g) return;
       const ei = easeOut3(smooth(p.delay, p.delay + 0.6, e));
-      const lift = i - 1 === S.focus ? fa : 0; // 클로즈업한 부품은 무리에서 한 발 더 나와 천천히 돈다
+      // 클로즈업: 주인공 부품만 남고 나머지는 화면 밖으로 비켜난다. 주인공은 커지며 턴테이블처럼 돈다
+      const lift = i - 1 === S.focus ? fa : 0;
+      const away = S.focus >= 0 && i - 1 !== S.focus ? fa : 0;
       if (p.g.userData.s0 === undefined) p.g.userData.s0 = p.g.scale.x;
-      p.g.position.copy(p.base).addScaledVector(p.off, ei).addScaledVector(p.off.clone().normalize(), 0.5 * lift);
+      p.g.position.copy(p.base).addScaledVector(p.off, ei).addScaledVector(p.off.clone().normalize(), 0.5 * lift + 4.5 * away);
       p.g.position.y += Math.sin(t * 1.2 + i * 1.7) * 0.035 * ei;
       p.g.rotation.z = Math.sin(t * 0.7 + i) * 0.03 * ei;
-      p.g.rotation.y = Math.sin(t * 0.5) * (i === 1 ? 0.25 : 0.6) * lift;
-      p.g.scale.setScalar(p.g.userData.s0 * (1 + 0.12 * lift));
+      p.g.userData.turn = lift > 0.01 ? (p.g.userData.turn || 0) + dt * 0.45 : 0;
+      p.g.rotation.y = p.g.userData.turn * lift;
+      p.g.scale.setScalar(p.g.userData.s0 * (1 + 0.3 * lift) * (1 - 0.6 * away));
     });
     const we = easeOut3(smooth(0.3, 0.9, e));
     this.wheels.forEach((w) => {
       const wl = w === this.wheels[0] && S.focus === 4 ? fa : 0;
-      w.g.position.set(w.base.x + Math.sign(w.base.x) * (0.35 * we + 0.3 * wl), w.base.y + Math.sin(t * 1.1 + w.base.x) * 0.03 * we + 0.12 * wl, w.base.z + w.side * (1.1 * we + 0.45 * wl));
+      const wa = S.focus >= 0 && !(w === this.wheels[0] && S.focus === 4) ? fa : 0;
+      w.g.position.set(w.base.x + Math.sign(w.base.x) * (0.35 * we + 0.3 * wl + 3 * wa), w.base.y + Math.sin(t * 1.1 + w.base.x) * 0.03 * we + 0.15 * wl, w.base.z + w.side * (1.1 * we + 0.45 * wl + 3 * wa));
+      w.g.userData.turn = wl > 0.01 ? (w.g.userData.turn || 0) + dt * 0.45 : 0;
+      w.g.rotation.y = w.g.userData.turn * wl;
+      w.g.scale.setScalar(1 + 0.3 * wl);
       const spinRate = 2 + S.launch * 60 + S.finale * 6 + (S.focus === 4 ? S.focusAmt * 3 : 0);
       (w.g.userData.spin as THREE.Group).rotation.z -= dt * spinRate;
     });
@@ -1043,6 +1058,10 @@ export class Engine {
       s.spring.scale.y = 1 + comp * 2;
       s.piston.position.set(w.x, w.y + 0.2 + comp, mid);
       s.arms.forEach((a) => (a.position.x = w.x));
+      // 다른 부품 클로즈업 중엔 서스펜션 막대도 치운다 (휠 클로즈업이면 앞바퀴 것만 남김)
+      const keep = S.focus < 0 || fa < 0.3 || (S.focus === 4 && s.wheel === 0);
+      s.arms.forEach((a) => (a.visible = keep));
+      s.spring.visible = s.piston.visible = keep;
     });
 
     /* X-RAY 재질 */
@@ -1075,7 +1094,7 @@ export class Engine {
     const scanMat = this.scan.material as THREE.ShaderMaterial;
     scanMat.uniforms.uTime.value = t;
     scanMat.uniforms.uOrigin.value.copy(lidarWorld).add(new THREE.Vector3(0, 0.1, 0));
-    scanMat.uniforms.uAmt.value = carVisible ? (0.18 + e * 0.5 + focusOn(1) * 1.2) * (1 - S.launch) * (1 - S.campus) : 0;
+    scanMat.uniforms.uAmt.value = carVisible ? ((0.18 + e * 0.5) * (1 - fa) + focusOn(1) * 1.2) * (1 - S.launch) * (1 - S.campus) : 0;
 
     // 모터
     this.rotor.rotation.z -= dt * (8 + focusOn(2) * 30 + S.launch * 40);
@@ -1108,7 +1127,7 @@ export class Engine {
     // 에너지 흐름
     {
       const src = this.battery.g.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, 0.12, 0));
-      const amt = carVisible ? e * (1 - S.launch) * (1 - 0.6 * fa) : 0;
+      const amt = carVisible ? e * (1 - S.launch) * (1 - fa) : 0;
       const pp = this.flow.geometry.attributes.position as THREE.BufferAttribute;
       const pa = this.flow.geometry.attributes.aA as THREE.BufferAttribute;
       const lp = this.flowLines.geometry.attributes.position as THREE.BufferAttribute;
@@ -1214,7 +1233,7 @@ export class Engine {
       const fpart = this.parts[S.focus + 1];
       const gp = fpart.g.getWorldPosition(new THREE.Vector3());
       const drop = [0.08, 0.06, 0.32, 0.08, 0.42][S.focus];
-      const size = [1.75, 0.38, 0.55, 0.6, 0.62][S.focus];
+      const size = [2.2, 0.5, 0.7, 0.75, 0.8][S.focus];
       this.holo.visible = true;
       this.holo.position.set(gp.x, gp.y - drop, gp.z);
       this.holo.scale.setScalar(size * (0.85 + 0.15 * fa));
@@ -1249,7 +1268,7 @@ export class Engine {
         new THREE.Vector3(0.9, 0.3, 1.0),
         new THREE.Vector3(0.55, 0.25, 1.2),
       ];
-      const dist = [5.6, 2.6, 3.2, 3.0, 3.0][S.focus];
+      const dist = [6.0, 2.9, 3.6, 3.3, 3.5][S.focus];
       const fpos = fp.clone().addScaledVector(dirs[S.focus].normalize(), dist);
       const k = easeOut3(S.focusAmt);
       pos.lerp(fpos, k);
@@ -1293,12 +1312,16 @@ export class Engine {
     if (portrait) {
       sy = lerp(0.1, 0.16, smooth(0, 0.5, e)) * (1 - ck) * (1 - fk) - fk * 0.08;
     } else {
-      sx = lerp(0.12, 0.13, smooth(0, 0.5, e));
-      sx = lerp(sx, -0.19, S.focus >= 0 ? easeOut3(S.focusAmt) : 0);
+      sx = lerp(0.1, 0.13, smooth(0, 0.5, e));
+      sy = 0.1 * S.hero; // 첫 화면: 아래 큰 워드마크 위로 차를 올린다
+      const fq2 = S.focus >= 0 ? easeOut3(S.focusAmt) : 0;
+      sx = lerp(sx, 0.14, fq2); // 설명 카드는 왼쪽 아래, 부품은 가운데-오른쪽
+      sy = lerp(sy, 0.04, fq2);
       sx = lerp(sx, 0.04, lk);
-      sx = lerp(sx, -0.17, ck);
+      sx = lerp(sx, 0, ck);
+      sy = lerp(sy, -0.04, ck);
       sx = lerp(sx, 0, fk);
-      sy = lerp(-0.1 * ck, -0.22, fk);
+      sy = lerp(sy, -0.22, fk);
     }
     this.shift.lerp(new THREE.Vector2(sx, sy), kk);
     const W = innerWidth, Hh = innerHeight;
@@ -1333,7 +1356,7 @@ export class Engine {
     };
     const partAlpha = carVisible ? smooth(0.55, 0.9, e) * (1 - S.launch) : 0;
     for (let i = 0; i < 5; i++) {
-      const focusDim = S.focus >= 0 && S.focus !== i ? 1 - S.focusAmt * 0.75 : 1;
+      const focusDim = S.focus >= 0 && S.focus !== i ? 1 - Math.min(1, S.focusAmt * 2) : 1;
       place(this.labels[i], this.parts[i + 1].anchor, partAlpha * focusDim);
       this.labels[i]?.classList.toggle('on', S.focus === i && S.focusAmt > 0.5);
     }
