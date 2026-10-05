@@ -1,6 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Engine } from './scene/engine';
-import { Waves } from './waves';
 
 const PARTS = [
   {
@@ -95,17 +94,21 @@ function techMap(p: number) {
   return { step, focus, focusAmt, explode };
 }
 
+const SEOUL_N = COLLEGES.filter((c) => c.campus === 'SEOUL').length;
+
 export default function App() {
   const canvas = useRef<HTMLCanvasElement>(null);
   const labels = useRef<HTMLDivElement>(null);
   const tech = useRef<HTMLElement>(null);
   const launch = useRef<HTMLElement>(null);
   const values = useRef<HTMLElement | null>(null);
+  const prism = useRef<HTMLDivElement>(null);
   const history = useRef<HTMLElement | null>(null);
   const track = useRef<HTMLDivElement>(null);
   const colleges = useRef<HTMLElement | null>(null);
-  const ring = useRef<HTMLDivElement>(null);
   const campus = useRef<HTMLElement>(null);
+  const finale = useRef<HTMLElement>(null);
+  const tilt = useRef<HTMLDivElement>(null);
   const opaque = useRef<HTMLElement[]>([]);
   const [step, setStep] = useState(0);
   const [virtue, setVirtue] = useState(0);
@@ -123,30 +126,45 @@ export default function App() {
     }
 
     let raf = 0, lastStep = -1, lastVirtue = -1, lastCollege = -1;
+    const mouse = { x: 0, y: 0, sx: 0, sy: 0 };
+    const onMove = (e: PointerEvent) => {
+      mouse.x = e.clientX / innerWidth - 0.5;
+      mouse.y = e.clientY / innerHeight - 0.5;
+    };
+    addEventListener('pointermove', onMove);
     const io = new IntersectionObserver((es) => es.forEach((e) => e.isIntersecting && e.target.classList.add('in')), { threshold: 0.2 });
     document.querySelectorAll('.rv').forEach((el) => io.observe(el));
-    const cards = Array.from(ring.current!.children) as HTMLElement[];
-    const N = cards.length, STEP = 360 / N;
+    const faces = Array.from(prism.current!.children) as HTMLElement[];
 
     const loop = () => {
       raf = requestAnimationFrame(loop);
       const vh = innerHeight;
+      mouse.sx += (mouse.x - mouse.sx) * 0.08;
+      mouse.sy += (mouse.y - mouse.sy) * 0.08;
       const tm = techMap(progress(tech.current!));
       const lp = progress(launch.current!);
       const cp = progress(campus.current!);
-      engine?.setState({ hero: clamp01(1 - scrollY / vh), explode: tm.explode, focus: tm.focus, focusAmt: tm.focusAmt, launch: smooth(0.05, 0.85, lp), campus: smooth(0, 0.55, cp), finale: 0 });
+      const fr = finale.current!.getBoundingClientRect();
+      const fin = clamp01((vh - fr.top) / vh);
+      engine?.setState({ hero: clamp01(1 - scrollY / vh), explode: tm.explode, focus: tm.focus, focusAmt: tm.focusAmt, launch: smooth(0.05, 0.85, lp), campus: smooth(0, 0.55, cp), finale: fin });
       const paused = opaque.current.some(covers);
       engine?.setPaused(paused);
       // 라벨마다 visibility가 따로 걸려 있어 부모 visibility로는 못 숨긴다 → display로 끈다
-      const finTop = document.getElementById('apply')!.getBoundingClientRect().top;
-      labels.current!.style.display = paused || finTop < vh * 0.7 || (!inView(tech.current!) && !inView(campus.current!)) ? 'none' : '';
-      // 밝은 섹션 위에선 메뉴 글씨를 어둡게
-      const navLight = opaque.current.some((el) => el.dataset.theme === 'light' && (() => { const r = el.getBoundingClientRect(); return r.top <= 40 && r.bottom > 40; })());
-      document.body.classList.toggle('nav-dark', navLight);
+      labels.current!.style.display = paused || fin > 0.3 || (!inView(tech.current!) && !inView(campus.current!)) ? 'none' : '';
 
       if (tm.step !== lastStep) setStep((lastStep = tm.step));
 
-      const v = Math.min(3, Math.floor(progress(values.current!) * 4));
+      // 漢陽 설계도: 마우스 따라 기울어지는 입체 글자
+      if (tilt.current) tilt.current.style.transform = `rotateX(${(-mouse.sy * 16).toFixed(2)}deg) rotateY(${(mouse.sx * 22).toFixed(2)}deg)`;
+
+      // 덕목 프리즘: 스크롤에 따라 사각 기둥이 위로 굴러간다
+      const vp = smooth(0.04, 0.96, progress(values.current!)) * 3;
+      prism.current!.style.transform = `translateZ(calc(var(--h) / -2)) rotateX(${(vp * 90).toFixed(2)}deg) rotateY(${(mouse.sx * 10).toFixed(2)}deg)`;
+      faces.forEach((f, i) => {
+        const d = Math.abs(vp - i);
+        f.style.filter = `brightness(${Math.max(0.25, 1 - d * 0.75).toFixed(3)})`;
+      });
+      const v = Math.min(3, Math.round(vp));
       if (v !== lastVirtue) setVirtue((lastVirtue = v));
 
       if (track.current) {
@@ -154,19 +172,14 @@ export default function App() {
         track.current.style.transform = `translate3d(${-max * smooth(0.04, 0.96, progress(history.current!))}px,0,0)`;
       }
 
-      // 단과대학 곡면 캐러셀: 스크롤에 따라 원통이 돈다
-      const cpos = smooth(0.02, 0.98, progress(colleges.current!)) * (N - 1);
-      ring.current!.style.transform = `translateZ(var(--r)) rotateY(${cpos * STEP}deg)`;
-      cards.forEach((c, i) => {
-        const d = Math.abs(i - cpos);
-        c.style.opacity = d > 4.5 ? '0' : String(1 - Math.max(0, d - 3) / 1.5);
-      });
-      const ci = Math.round(cpos);
+      // 단과대학 타워: 스크롤에 따라 한 층씩 빠져나온다
+      const ci = Math.min(COLLEGES.length - 1, Math.floor(smooth(0.03, 0.97, progress(colleges.current!)) * COLLEGES.length));
       if (ci !== lastCollege) setCollege((lastCollege = ci));
     };
     raf = requestAnimationFrame(loop);
     return () => {
       cancelAnimationFrame(raf);
+      removeEventListener('pointermove', onMove);
       io.disconnect();
       engine?.dispose();
     };
@@ -176,6 +189,21 @@ export default function App() {
     if (el && !opaque.current.includes(el)) opaque.current.push(el);
   };
   const c = COLLEGES[college];
+  const tower = (campusKey: 'SEOUL' | 'ERICA') => {
+    const list = COLLEGES.map((cc, i) => ({ ...cc, i })).filter((cc) => cc.campus === campusKey);
+    return (
+      <div className={`tower tower--${campusKey.toLowerCase()}`}>
+        {list.map((cc, k) => (
+          <div key={cc.ko} className={`fl ${cc.i === college ? 'on' : ''} ${cc.i < college ? 'past' : ''}`} style={{ '--z': k } as React.CSSProperties}>
+            <i className="fl__t"><span>{String(cc.i + 1).padStart(2, '0')}</span></i>
+            <i className="fl__a" />
+            <i className="fl__b" />
+          </div>
+        ))}
+        <span className="tower__name">{campusKey === 'SEOUL' ? 'SEOUL' : 'ERICA'}</span>
+      </div>
+    );
+  };
 
   return (
     <>
@@ -189,57 +217,61 @@ export default function App() {
             <b><em>{p.no}</em>{p.en}</b>
           </div>
         ))}
-        <div className="tag tag--campus"><i /><b>서울캠퍼스</b></div>
-        <div className="tag tag--campus"><i /><b>ERICA캠퍼스</b></div>
+        <div className="tag tag--campus"><i /><b>SEOUL · 왕십리</b></div>
+        <div className="tag tag--campus"><i /><b>ERICA · 안산</b></div>
       </div>
 
       <header className="nav">
-        <a href="#top" className="nav__logo">Hanyang<sup>1939</sup></a>
+        <a href="#top" className="nav__logo"><span className="nav__mark">HY</span><span className="nav__word">HANYANG<br />UNIVERSITY</span></a>
         <nav className="nav__links">
-          <a href="#name">Name</a><a href="#tech">Technology</a><a href="#values">Values</a><a href="#colleges">Colleges</a><a href="#campus">Campus</a>
+          <a href="#name"><em>01</em>漢陽</a><a href="#tech"><em>02</em>Tech</a><a href="#values"><em>03</em>Virtues</a><a href="#colleges"><em>04</em>Colleges</a><a href="#campus"><em>05</em>Campus</a>
         </nav>
-        <a className="nav__cta" href="https://go.hanyang.ac.kr" target="_blank" rel="noopener">입학 안내 ↗</a>
+        <a className="nav__cta" href="https://go.hanyang.ac.kr" target="_blank" rel="noopener">입학 안내</a>
       </header>
 
       <main>
-        {/* HERO */}
+        {/* HERO — 3D 글자 HANYANG 은 캔버스 안에 서 있다 */}
         <section className="hero" id="top">
+          <h1 className="sr-only">한양대학교 HANYANG UNIVERSITY</h1>
           <div className="hero__top">
-            <span className="eyebrow">HANYANG UNIVERSITY · EST. 1939</span>
-            <span className="eyebrow">SEOUL — ERICA</span>
+            <span className="coord">37.557°N · 127.045°E</span>
+            <span className="coord">EST. 1939 — SEOUL / ERICA</span>
           </div>
           <div className="hero__bottom">
-            <p className="hero__kicker">사랑을 실천하는, 대한민국의 엔진.</p>
-            <h1 className="hero__word"><span>Hanyang</span></h1>
-            <div className="hero__bar">
-              <p>사랑의 실천 — Love in Deed and Truth.<br />말이 아니라 기술과 행동으로 증명해 온 대학.</p>
+            <h2 className="hero__title">Engine of <span>Korea</span></h2>
+            <div className="hero__side">
+              <p>사랑의 실천 — Love in Deed and Truth. 1939년부터, 말이 아니라 기술로 증명해 온 대학.</p>
               <div className="hero__cta">
-                <a href="#tech" className="btn btn--light">기술 둘러보기</a>
-                <a href="#name" className="btn btn--ghost">Scroll ↓</a>
+                <a href="#tech" className="btn btn--blue">엔진 열어보기</a>
+                <a href="#name" className="btn btn--line">Scroll</a>
               </div>
             </div>
           </div>
         </section>
 
-        {/* NAME — 밝은 섹션 */}
-        <section className="name" data-theme="light" id="name" ref={addOpaque}>
-          <div className="name__card rv">
-            <span className="eyebrow eyebrow--dark">01 — OUR NAME</span>
-            <h2 className="name__glyph">漢陽</h2>
-            <p className="name__line">서울의 옛 이름을 교명으로.</p>
-            <dl className="name__dict">
-              <div><dt>漢</dt><dd>한수 한</dd></div>
-              <div><dt>陽</dt><dd>볕 양</dd></div>
-            </dl>
+        {/* NAME — 설계도 위의 입체 漢陽 */}
+        <section className="name" id="name" ref={addOpaque}>
+          <div className="name__fig">
+            <span className="fig">FIG. 01 — 校名</span>
+            <div className="name__stage">
+              <div className="name__tilt" ref={tilt}>
+                <span className="name__glyph" data-t="漢陽">漢陽</span>
+                <span className="dim dim--x"><i />漢 한수 한 · 陽 볕 양<i /></span>
+                <span className="dim dim--y"><i />HAN·YANG<i /></span>
+              </div>
+            </div>
           </div>
           <div className="name__copy">
-            <p className="lead lead--dark rv">한양은 서울의 옛 이름입니다. 1939년, 나라의 내일을 공학으로 세우겠다는 뜻으로 문을 연 이 대학은 수도의 이름을 걸고 대한민국 산업의 길을 함께 걸어 왔습니다.</p>
-            <div className="name__facts rv">
-              <div><b>1939</b><span>개교</span></div>
-              <div><b>2</b><span>캠퍼스</span></div>
-              <div><b>25</b><span>단과대학</span></div>
-            </div>
-            <p className="name__lion rv"><span>SYMBOL</span> 한양의 상징은 <b>사자</b>. 용기가 있되 만용을 멀리하고, 앞서되 교만하지 않는 지성인의 의지. 마스코트는 HanYang + Lion, <b>하이리온</b>.</p>
+            <span className="fig">SPEC</span>
+            <h2 className="rv">서울의 옛 이름을<br />교명으로 건 대학.</h2>
+            <p className="lead rv">한양은 서울의 옛 이름입니다. 1939년, 나라의 내일을 공학으로 세우겠다는 뜻으로 문을 연 이 대학은 수도의 이름을 걸고 대한민국 산업의 길을 함께 걸어 왔습니다.</p>
+            <table className="spec-table rv">
+              <tbody>
+                <tr><th>FOUNDED</th><td>1939</td><th>CAMPUS</th><td>2</td></tr>
+                <tr><th>COLLEGES</th><td>25</td><th>SYMBOL</th><td>LION</td></tr>
+              </tbody>
+            </table>
+            <p className="name__lion rv">한양의 상징은 <b>사자</b> — 용기가 있되 만용을 멀리하고, 앞서되 교만하지 않는 지성인의 의지. 마스코트는 HanYang + Lion, <b>하이리온</b>.</p>
           </div>
         </section>
 
@@ -249,20 +281,20 @@ export default function App() {
             <div className="tech__intro" data-show={step <= 1 || step === 7}>
               {step === 0 && (
                 <div key="s0" className="swap">
-                  <span className="eyebrow">02 — TECHNOLOGY</span>
-                  <h2>당신이 타게 될 미래의 차,<br />그 안의 한양.</h2>
-                  <p className="lead">스크롤을 내리면 차가 열립니다.</p>
+                  <span className="fig">FIG. 02 — TECHNOLOGY</span>
+                  <h2>미래의 차 한 대,<br />그 안의 한양.</h2>
+                  <p className="lead">스크롤하면 차가 열립니다.</p>
                 </div>
               )}
               {step === 1 && (
                 <div key="s1" className="swap">
-                  <span className="eyebrow">EXPLODED VIEW</span>
+                  <span className="fig">EXPLODED VIEW</span>
                   <h2>다섯 개의 부품,<br />다섯 개의 한양 기술.</h2>
                 </div>
               )}
               {step === 7 && (
                 <div key="s7" className="swap">
-                  <span className="eyebrow">REASSEMBLE</span>
+                  <span className="fig">REASSEMBLE</span>
                   <h2>다섯 개의 기술이,<br />하나의 심장으로.</h2>
                 </div>
               )}
@@ -272,8 +304,7 @@ export default function App() {
                 const p = PARTS[step - 2];
                 return (
                   <article key={p.no} className="spec__card swap">
-                    <div className="spec__head"><span className="spec__no">{p.no}</span><span className="spec__en">{p.en}</span></div>
-                    <p className="spec__part">{p.ko}</p>
+                    <div className="spec__head"><span className="spec__no">{p.no}</span><span className="spec__en">{p.en}</span><span className="spec__ko">{p.ko}</span></div>
                     <h3>{p.title}</h3>
                     <p className="spec__body">{p.body}</p>
                     <p className="spec__lab">{p.lab}</p>
@@ -281,7 +312,7 @@ export default function App() {
                 );
               })()}
               <ol className="spec__dots">
-                {PARTS.map((p, i) => <li key={p.no} className={step - 2 === i ? 'on' : step - 2 > i ? 'done' : ''} />)}
+                {PARTS.map((p, i) => <li key={p.no} className={step - 2 === i ? 'on' : step - 2 > i ? 'done' : ''}>{p.no}</li>)}
               </ol>
             </div>
           </div>
@@ -290,34 +321,43 @@ export default function App() {
         {/* LAUNCH */}
         <section className="launch" ref={launch}>
           <div className="sticky launch__inner">
-            <h2 className="launch__title">미래로, <em>질주.</em></h2>
+            <h2 className="launch__title"><span>FULL</span><span>THROTTLE</span></h2>
+            <p className="launch__sub">미래로, 질주.</p>
           </div>
         </section>
 
-        {/* VALUES — 한 단어 한 화면 */}
+        {/* VALUES — 굴러가는 3D 프리즘 */}
         <section className="values" id="values" ref={(el) => { values.current = el; addOpaque(el); }}>
           <div className="sticky values__inner">
-            <Waves colors={VIRTUES[virtue].hue} />
-            <span className="eyebrow values__eyebrow">03 — FOUR VIRTUES · 한양인의 덕목</span>
-            <div className="values__word" key={virtue}>
-              <h2>{VIRTUES[virtue].ko}</h2>
-              <p className="values__en">{VIRTUES[virtue].en}</p>
-              <p className="values__d">{VIRTUES[virtue].d}</p>
+            <span className="fig values__fig">FIG. 03 — FOUR VIRTUES</span>
+            <div className="prism-stage">
+              <div className="prism" ref={prism}>
+                {VIRTUES.map((v, i) => (
+                  <div key={v.ko} className="pface" style={{ transform: `rotateX(${-i * 90}deg) translateZ(calc(var(--h) / 2))`, '--c1': v.hue[0], '--c2': v.hue[1] } as React.CSSProperties}>
+                    <span className="pface__no">0{i + 1}</span>
+                    <h2>{v.ko}</h2>
+                    <div className="pface__side">
+                      <b>{v.en}</b>
+                      <p>{v.d}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
             <ol className="values__nav">
-              {VIRTUES.map((v, i) => <li key={v.ko} className={i === virtue ? 'on' : ''}><span>0{i + 1}</span>{v.ko}</li>)}
+              {VIRTUES.map((v, i) => <li key={v.ko} className={i === virtue ? 'on' : ''}><span>0{i + 1}</span>{v.ko} {v.en}</li>)}
             </ol>
           </div>
         </section>
 
-        {/* HISTORY — 밝은 섹션, 가로 연표 */}
-        <section className="history" data-theme="light" id="history" ref={(el) => { history.current = el; addOpaque(el); }}>
+        {/* HISTORY — 입체 숫자 연표 */}
+        <section className="history" id="history" ref={(el) => { history.current = el; addOpaque(el); }}>
           <div className="sticky history__sticky">
-            <span className="eyebrow eyebrow--dark history__eyebrow">04 — SINCE 1939</span>
+            <span className="fig history__fig">FIG. 04 — SINCE 1939</span>
             <div className="history__track" ref={track}>
               {HISTORY.map(([y, t, d], i) => (
                 <article className="era" key={y}>
-                  <span className="era__year">{y}</span>
+                  <span className="era__year" data-t={y}>{y}</span>
                   <div className="era__body">
                     <span>0{i + 1}</span>
                     <h3>{t}</h3>
@@ -329,28 +369,25 @@ export default function App() {
           </div>
         </section>
 
-        {/* COLLEGES — 밝은 섹션, 곡면 카드 */}
-        <section className="colleges" data-theme="light" id="colleges" ref={(el) => { colleges.current = el; addOpaque(el); }}>
+        {/* COLLEGES — 아이소메트릭 3D 타워 */}
+        <section className="colleges" id="colleges" ref={(el) => { colleges.current = el; addOpaque(el); }}>
           <div className="sticky colleges__sticky">
             <div className="colleges__head">
-              <span className="eyebrow eyebrow--dark">05 — COLLEGES</span>
-              <h2>스물다섯 개의 문,<br />당신의 길은?</h2>
+              <span className="fig">FIG. 05 — COLLEGES</span>
+              <h2>스물다섯 층,<br />당신의 층은?</h2>
             </div>
-            <div className="stage3d">
-              <div className="ring" ref={ring}>
-                {COLLEGES.map((cc, i) => (
-                  <article key={cc.ko} className={`ccard ccard--${cc.campus.toLowerCase()}`} style={{ transform: `rotateY(${-(i * 360) / COLLEGES.length}deg) translateZ(calc(var(--r) * -1))` }}>
-                    <span className="ccard__no">{String(i + 1).padStart(2, '0')}</span>
-                    <span className="ccard__campus">{cc.campus}</span>
-                    <h3>{cc.ko}</h3>
-                    <em>{cc.en}</em>
-                  </article>
-                ))}
+            <div className="iso-stage">
+              <div className="iso">
+                {tower('SEOUL')}
+                {tower('ERICA')}
               </div>
             </div>
-            <div className="colleges__foot">
-              <p><b>{c?.ko}</b> <em>{c?.en}</em> · {c?.campus === 'SEOUL' ? '서울캠퍼스' : 'ERICA캠퍼스'}</p>
-              <span>{String(college + 1).padStart(2, '0')} / {COLLEGES.length}</span>
+            <div className="colleges__now" key={college}>
+              <span className="fig">{c.campus === 'SEOUL' ? 'SEOUL CAMPUS' : 'ERICA CAMPUS'} · FLOOR {String((c.campus === 'SEOUL' ? college : college - SEOUL_N) + 1).padStart(2, '0')}</span>
+              <h3>{c.ko}</h3>
+              <em>{c.en}</em>
+              <div className="colleges__bar"><i style={{ width: `${((college + 1) / COLLEGES.length) * 100}%` }} /></div>
+              <span className="colleges__count">{String(college + 1).padStart(2, '0')} / {COLLEGES.length}</span>
             </div>
           </div>
         </section>
@@ -358,26 +395,25 @@ export default function App() {
         {/* CAMPUS — 3D 맵 */}
         <section className="campus" id="campus" ref={campus}>
           <div className="sticky campus__inner">
-            <span className="eyebrow">06 — TWO CAMPUSES</span>
+            <span className="fig">FIG. 06 — TWO CAMPUSES</span>
             <h2>하나의 한양,<br />두 개의 엔진.</h2>
             <div className="campus__cards">
-              <article><span>SEOUL</span><h3>서울캠퍼스</h3><p>서울 성동구 왕십리. 공과대학과 의과대학을 비롯한 한양의 본교.</p></article>
-              <article><span>ERICA</span><h3>ERICA캠퍼스</h3><p>경기 안산. 산학협력과 융합 교육을 설계하는, 현장과 가장 가까운 캠퍼스.</p></article>
+              <article><span>SITE A</span><h3>서울캠퍼스</h3><p>서울 성동구 왕십리. 공과대학과 의과대학을 비롯한 한양의 본교.</p></article>
+              <article><span>SITE B</span><h3>ERICA캠퍼스</h3><p>경기 안산. 산학협력과 융합 교육을 설계하는, 현장과 가장 가까운 캠퍼스.</p></article>
             </div>
           </div>
         </section>
 
-        {/* FINALE — 빛줄기 */}
-        <section className="finale" data-theme="light" id="apply" ref={addOpaque}>
-          <div className="rays" aria-hidden />
+        {/* FINALE — 3D 무대로 돌아온 차와 솟아오르는 글자 */}
+        <section className="finale" id="apply" ref={finale}>
           <div className="finale__inner">
-            <h2 className="rv">사랑의 실천자,<br />한양에서 시작됩니다.</h2>
-            <a className="btn btn--dark rv" href="https://go.hanyang.ac.kr" target="_blank" rel="noopener">입학처 바로가기 →</a>
+            <span className="fig">FIG. 07 — IGNITION</span>
+            <h2>사랑의 실천자,<br />한양에서 시동을 겁니다.</h2>
+            <a className="btn btn--blue btn--big" href="https://go.hanyang.ac.kr" target="_blank" rel="noopener">입학처 바로가기 →</a>
           </div>
           <footer className="footer">
-            <span>서울캠퍼스 · 서울 성동구</span>
-            <span>본 페이지는 Team Semicolon이 제작한 비공식 홍보 페이지입니다. 공식 정보 · <a href="https://www.hanyang.ac.kr" target="_blank" rel="noopener">hanyang.ac.kr</a></span>
-            <span>ERICA캠퍼스 · 경기 안산</span>
+            <span>본 페이지는 Team Semicolon이 제작한 비공식 홍보 페이지입니다.</span>
+            <span>공식 정보 · <a href="https://www.hanyang.ac.kr" target="_blank" rel="noopener">hanyang.ac.kr</a></span>
           </footer>
         </section>
       </main>

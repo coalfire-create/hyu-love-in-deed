@@ -9,6 +9,9 @@ import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { Reflector } from 'three/examples/jsm/objects/Reflector.js';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
+import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
+import archivo from '../assets/archivo-black.typeface.json';
 
 export interface EngineState {
   hero: number; // 1 = 첫 화면
@@ -219,6 +222,8 @@ export class Engine {
   private dust!: THREE.Points;
   private wordmark!: THREE.Mesh;
   private underGlow!: THREE.PointLight;
+  private letters: THREE.Mesh[] = [];
+  private lettersG = new THREE.Group();
   private key!: THREE.DirectionalLight;
   private focusSpot!: THREE.SpotLight;
   private holo = new THREE.Group();
@@ -282,6 +287,7 @@ export class Engine {
     this.buildCar();
     this.buildFx();
     this.buildCampus();
+    this.buildLetters();
 
     this.resize();
     addEventListener('resize', this.onResizeBound);
@@ -932,6 +938,39 @@ export class Engine {
     this.scene.add(this.holo);
   }
 
+  /* ───────────────────────── 바닥에 서 있는 입체 글자 HANYANG ───────────────────────── */
+  private buildLetters() {
+    const font = new FontLoader().parse(archivo as any);
+    const metal = new THREE.MeshPhysicalMaterial({ color: '#0e4a84', metalness: 0.85, roughness: 0.22, clearcoat: 1, clearcoatRoughness: 0.08, envMapIntensity: 1.6 });
+    const face = new THREE.MeshPhysicalMaterial({ color: '#b9c9e6', metalness: 0.7, roughness: 0.38, clearcoat: 0.6, envMapIntensity: 1.1 });
+    const size = 1.3, gap = 0.12;
+    const geos = [...'HANYANG'].map((ch) => {
+      const g = new TextGeometry(ch, { font, size, depth: 0.5, curveSegments: 10, bevelEnabled: true, bevelThickness: 0.03, bevelSize: 0.02, bevelSegments: 3 });
+      g.computeBoundingBox();
+      return g;
+    });
+    const widths = geos.map((g) => g.boundingBox!.max.x - g.boundingBox!.min.x);
+    const total = widths.reduce((a, b) => a + b, 0) + gap * (geos.length - 1);
+    let x = -total / 2;
+    geos.forEach((g, i) => {
+      g.translate(-g.boundingBox!.min.x, 0, -0.25);
+      // 앞면(z+)은 밝은 크롬, 옆면은 한양 블루 — TextGeometry 그룹 0=앞뒤 면, 1=옆면
+      const m = new THREE.Mesh(g, [face, metal]);
+      m.position.x = x;
+      m.castShadow = m.receiveShadow = true;
+      m.userData.x = x;
+      x += widths[i] + gap;
+      this.letters.push(m);
+      this.lettersG.add(m);
+    });
+    // 글자 밑 발광 라인
+    const base = new THREE.Mesh(new THREE.BoxGeometry(total + 0.6, 0.02, 0.02), glow(SKY, 4));
+    base.position.set(0, 0.01, 0.4);
+    this.lettersG.add(base);
+    this.lettersG.position.set(0, FLOOR_Y, -6.2);
+    this.scene.add(this.lettersG);
+  }
+
   /* ───────────────────────── 캠퍼스: 서울 · ERICA 3D 맵 ───────────────────────── */
   private buildCampus() {
     const clusters = [
@@ -1212,6 +1251,17 @@ export class Engine {
       (this.arcFlow.material as THREE.PointsMaterial).opacity = smooth(0.4, 0.9, S.campus) * fall;
     }
 
+    /* 입체 글자: 첫 화면과 마지막 화면에서만 바닥에서 솟아오른다 */
+    {
+      const amt = Math.max(S.hero, smooth(0.3, 0.9, S.finale));
+      this.lettersG.visible = amt > 0.01;
+      this.letters.forEach((m, i) => {
+        const k = easeOut3(smooth(i * 0.06, 0.6 + i * 0.06, amt));
+        m.position.y = -2.2 * (1 - k) + Math.sin(t * 1.1 + i * 0.7) * 0.03 * k;
+        m.rotation.y = (1 - k) * 0.8 + Math.sin(t * 0.5 + i) * 0.03;
+      });
+    }
+
     /* 공기·조명 */
     const ambient = (1 - S.launch * 0.7) * (1 - S.campus * 0.6) + S.finale;
     this.beams.forEach((b, i) => ((b.material as THREE.ShaderMaterial).uniforms.uAmt.value = ambient * (0.8 + 0.2 * Math.sin(t * 0.8 + i))));
@@ -1253,8 +1303,8 @@ export class Engine {
     this.scene.environmentIntensity = 0.55 * (1 - 0.45 * fa);
 
     /* 카메라 */
-    const pos = new THREE.Vector3(6.6, 1.15, 7.9);
-    const tgt = new THREE.Vector3(0, -0.42, 0);
+    const pos = new THREE.Vector3(1.6, 1.7, 9.6);
+    const tgt = new THREE.Vector3(0, -0.05, -2.4);
     let fov = 36;
     pos.lerp(new THREE.Vector3(7.4, 3.8, 10.0), smooth(0, 0.6, e));
     tgt.lerp(new THREE.Vector3(-0.3, 0.4, 0.2), smooth(0, 0.6, e));
@@ -1285,8 +1335,8 @@ export class Engine {
     tgt.lerp(new THREE.Vector3(0, 0, 0), ck);
     fov = lerp(fov, 42, ck);
     const fk = smooth(0, 0.8, S.finale);
-    pos.lerp(new THREE.Vector3(5.6, 0.8, 7.0), fk);
-    tgt.lerp(new THREE.Vector3(carX * 0.3, -0.35, 0), fk);
+    pos.lerp(new THREE.Vector3(1.4, 1.6, 9.2), fk);
+    tgt.lerp(new THREE.Vector3(carX * 0.3, -0.05, -2.4), fk);
     fov = lerp(fov, 34, fk);
 
     if (portrait) {
@@ -1313,7 +1363,8 @@ export class Engine {
       sy = lerp(0.1, 0.16, smooth(0, 0.5, e)) * (1 - ck) * (1 - fk) - fk * 0.08;
     } else {
       sx = lerp(0.1, 0.13, smooth(0, 0.5, e));
-      sy = 0.1 * S.hero; // 첫 화면: 아래 큰 워드마크 위로 차를 올린다
+      sx = lerp(sx, 0, S.hero);
+      sy = 0.04 * S.hero; // 첫 화면: 3D 글자와 차를 가운데에
       const fq2 = S.focus >= 0 ? easeOut3(S.focusAmt) : 0;
       sx = lerp(sx, 0.14, fq2); // 설명 카드는 왼쪽 아래, 부품은 가운데-오른쪽
       sy = lerp(sy, 0.04, fq2);
@@ -1321,7 +1372,7 @@ export class Engine {
       sx = lerp(sx, 0, ck);
       sy = lerp(sy, -0.04, ck);
       sx = lerp(sx, 0, fk);
-      sy = lerp(sy, -0.22, fk);
+      sy = lerp(sy, -0.12, fk);
     }
     this.shift.lerp(new THREE.Vector2(sx, sy), kk);
     const W = innerWidth, Hh = innerHeight;
