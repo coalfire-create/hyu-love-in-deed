@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Engine } from './scene/engine';
+import { Engine, ACCENTS } from './scene/engine';
 
 const PARTS = [
   {
@@ -35,10 +35,10 @@ const PARTS = [
 ];
 
 const VIRTUES = [
-  { ko: '근면', en: 'Diligence', d: '오늘의 작은 수고가 내일의 구조를 만든다.', hue: ['#7fb2ff', '#3e7fd1'] },
-  { ko: '정직', en: 'Honesty', d: '하중을 속이지 않는 설계처럼, 사람에게도 정직하게.', hue: ['#9ad7ff', '#2a6fd6'] },
-  { ko: '겸손', en: 'Humility', d: '앞서 나가되 교만하지 않는 지성인의 태도.', hue: ['#b9a8ff', '#4b5be0'] },
-  { ko: '봉사', en: 'Service', d: '배운 것을 세상의 쓸모로 돌려주는 실천.', hue: ['#8ff0d8', '#1d7fa8'] },
+  { ko: '근면', en: 'Diligence', d: '오늘의 작은 수고가 내일의 구조를 만든다.', hue: ['#7fb2ff', '#1f4fc4'] },
+  { ko: '정직', en: 'Honesty', d: '하중을 속이지 않는 설계처럼, 사람에게도 정직하게.', hue: ['#5ff2d2', '#0b7a86'] },
+  { ko: '겸손', en: 'Humility', d: '앞서 나가되 교만하지 않는 지성인의 태도.', hue: ['#c6adff', '#5a33c4'] },
+  { ko: '봉사', en: 'Service', d: '배운 것을 세상의 쓸모로 돌려주는 실천.', hue: ['#ffc56b', '#c2511a'] },
 ];
 
 const HISTORY = [
@@ -135,6 +135,20 @@ export default function App() {
     const io = new IntersectionObserver((es) => es.forEach((e) => e.isIntersecting && e.target.classList.add('in')), { threshold: 0.2 });
     document.querySelectorAll('.rv').forEach((el) => io.observe(el));
     const faces = Array.from(prism.current!.children) as HTMLElement[];
+    const coins = Array.from(document.querySelectorAll<HTMLElement>('.coin'));
+    // 숫자 카운트업 (보일 때 한 번)
+    const cio = new IntersectionObserver((es) => es.forEach((e) => {
+      if (!e.isIntersecting) return;
+      const el = e.target as HTMLElement, to = +el.dataset.to!, t0 = performance.now();
+      const step = (n: number) => {
+        const k = Math.min(1, (n - t0) / 1600), v = Math.round(to * (1 - Math.pow(1 - k, 3)));
+        el.textContent = String(v);
+        if (k < 1) requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+      cio.unobserve(el);
+    }), { threshold: 0.6 });
+    document.querySelectorAll('[data-to]').forEach((el) => cio.observe(el));
 
     const loop = () => {
       raf = requestAnimationFrame(loop);
@@ -155,7 +169,10 @@ export default function App() {
       if (tm.step !== lastStep) setStep((lastStep = tm.step));
 
       // 漢陽 설계도: 마우스 따라 기울어지는 입체 글자
-      if (tilt.current) tilt.current.style.transform = `rotateX(${(-mouse.sy * 16).toFixed(2)}deg) rotateY(${(mouse.sx * 22).toFixed(2)}deg)`;
+      // 교표 코인: 천천히 돌면서 마우스 쪽으로 기운다 (앞=교표, 뒤=사자)
+      const now = performance.now() / 1000;
+      coins.forEach((cn) => (cn.style.transform = `rotateX(${(-mouse.sy * 18).toFixed(2)}deg) rotateY(${(now * 38 + mouse.sx * 40).toFixed(2)}deg)`));
+      if (tilt.current) tilt.current.style.transform = `translate3d(${(mouse.sx * -30).toFixed(1)}px, ${(mouse.sy * -20).toFixed(1)}px, 0)`;
 
       // 덕목 프리즘: 스크롤에 따라 사각 기둥이 위로 굴러간다
       const vp = smooth(0.04, 0.96, progress(values.current!)) * 3;
@@ -181,6 +198,7 @@ export default function App() {
       cancelAnimationFrame(raf);
       removeEventListener('pointermove', onMove);
       io.disconnect();
+      cio.disconnect();
       engine?.dispose();
     };
   }, []);
@@ -212,7 +230,7 @@ export default function App() {
 
       <div className="labels" ref={labels} aria-hidden>
         {PARTS.map((p) => (
-          <div className={p.no === '03' ? 'tag tag--left' : 'tag'} key={p.no}>
+          <div className={p.no === '03' ? 'tag tag--left' : 'tag'} key={p.no} style={{ '--acc': ACCENTS[+p.no - 1] } as React.CSSProperties}>
             <i />
             <b><em>{p.no}</em>{p.en}</b>
           </div>
@@ -222,7 +240,7 @@ export default function App() {
       </div>
 
       <header className="nav">
-        <a href="#top" className="nav__logo"><span className="nav__mark">HY</span><span className="nav__word">HANYANG<br />UNIVERSITY</span></a>
+        <a href="#top" className="nav__logo"><img className="nav__seal" src="/brand/seal.png" alt="" /><span className="nav__word">HANYANG<br />UNIVERSITY</span></a>
         <nav className="nav__links">
           <a href="#name"><em>01</em>漢陽</a><a href="#tech"><em>02</em>Tech</a><a href="#values"><em>03</em>Virtues</a><a href="#colleges"><em>04</em>Colleges</a><a href="#campus"><em>05</em>Campus</a>
         </nav>
@@ -249,28 +267,31 @@ export default function App() {
           </div>
         </section>
 
-        {/* NAME — 설계도 위의 입체 漢陽 */}
+        {/* NAME — 밝고 생기 있는 교명 섹션 + 3D 교표 코인 */}
         <section className="name" id="name" ref={addOpaque}>
-          <div className="name__fig">
-            <span className="fig">FIG. 01 — 校名</span>
-            <div className="name__stage">
-              <div className="name__tilt" ref={tilt}>
-                <span className="name__glyph" data-t="漢陽">漢陽</span>
-                <span className="dim dim--x"><i />漢 한수 한 · 陽 볕 양<i /></span>
-                <span className="dim dim--y"><i />HAN·YANG<i /></span>
+          <div className="name__blobs" aria-hidden><i /><i /><i /></div>
+          <div className="name__visual">
+            <span className="name__ghost" ref={tilt} aria-hidden>漢陽</span>
+            <div className="coin-stage">
+              <div className="coin coin--big">
+                <img className="coin__face" src="/brand/seal.png" alt="한양대학교 교표" />
+                {Array.from({ length: 14 }, (_, i) => <i key={i} className="coin__edge" style={{ transform: `translateZ(${-1 - i}px)` }} />)}
+                <div className="coin__back"><img src="/brand/lion-blue.png" alt="" /></div>
               </div>
+              <div className="coin-shadow" />
             </div>
+            <p className="name__hanja"><b>漢</b> 한수 한 <b>陽</b> 볕 양</p>
           </div>
           <div className="name__copy">
-            <span className="fig">SPEC</span>
-            <h2 className="rv">서울의 옛 이름을<br />교명으로 건 대학.</h2>
+            <span className="fig">FIG. 01 — 校名 漢陽</span>
+            <h2 className="rv">서울의 옛 이름을<br /><span className="grad">교명으로 건 대학.</span></h2>
             <p className="lead rv">한양은 서울의 옛 이름입니다. 1939년, 나라의 내일을 공학으로 세우겠다는 뜻으로 문을 연 이 대학은 수도의 이름을 걸고 대한민국 산업의 길을 함께 걸어 왔습니다.</p>
-            <table className="spec-table rv">
-              <tbody>
-                <tr><th>FOUNDED</th><td>1939</td><th>CAMPUS</th><td>2</td></tr>
-                <tr><th>COLLEGES</th><td>25</td><th>SYMBOL</th><td>LION</td></tr>
-              </tbody>
-            </table>
+            <div className="stat-grid">
+              <div className="stat rv" style={{ '--g1': '#2f6fd0', '--g2': '#5fb0ff' } as React.CSSProperties}><span>FOUNDED</span><b data-to="1939">1939</b><em>개교</em></div>
+              <div className="stat rv" style={{ '--g1': '#0b8f8a', '--g2': '#3ff0c8' } as React.CSSProperties}><span>CAMPUS</span><b data-to="2">2</b><em>서울 · ERICA</em></div>
+              <div className="stat rv" style={{ '--g1': '#5a33c4', '--g2': '#b08cff' } as React.CSSProperties}><span>COLLEGES</span><b data-to="25">25</b><em>단과대학</em></div>
+              <div className="stat stat--lion rv"><img src="/brand/lion-mask.png" alt="" /><span>SYMBOL</span><b>LION</b><em>하이리온</em></div>
+            </div>
             <p className="name__lion rv">한양의 상징은 <b>사자</b> — 용기가 있되 만용을 멀리하고, 앞서되 교만하지 않는 지성인의 의지. 마스코트는 HanYang + Lion, <b>하이리온</b>.</p>
           </div>
         </section>
@@ -303,7 +324,7 @@ export default function App() {
               {step >= 2 && step <= 6 && (() => {
                 const p = PARTS[step - 2];
                 return (
-                  <article key={p.no} className="spec__card swap">
+                  <article key={p.no} className="spec__card swap" style={{ '--acc': ACCENTS[step - 2] } as React.CSSProperties}>
                     <div className="spec__head"><span className="spec__no">{p.no}</span><span className="spec__en">{p.en}</span><span className="spec__ko">{p.ko}</span></div>
                     <h3>{p.title}</h3>
                     <p className="spec__body">{p.body}</p>
@@ -407,6 +428,11 @@ export default function App() {
         {/* FINALE — 3D 무대로 돌아온 차와 솟아오르는 글자 */}
         <section className="finale" id="apply" ref={finale}>
           <div className="finale__inner">
+            <div className="coin coin--small" aria-hidden>
+              <img className="coin__face" src="/brand/seal.png" alt="" />
+              {Array.from({ length: 8 }, (_, i) => <i key={i} className="coin__edge" style={{ transform: `translateZ(${-1 - i}px)` }} />)}
+              <div className="coin__back"><img src="/brand/lion-blue.png" alt="" /></div>
+            </div>
             <span className="fig">FIG. 07 — IGNITION</span>
             <h2>사랑의 실천자,<br />한양에서 시동을 겁니다.</h2>
             <a className="btn btn--blue btn--big" href="https://go.hanyang.ac.kr" target="_blank" rel="noopener">입학처 바로가기 →</a>

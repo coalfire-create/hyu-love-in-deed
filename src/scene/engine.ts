@@ -24,6 +24,9 @@ export interface EngineState {
 }
 
 const SKY = new THREE.Color('#7fb2ff');
+// 부품별 고유 색 (배터리·라이다·모터·콕핏·서스펜션) — 클로즈업 무대 조명과 발광에 쓴다
+export const ACCENTS = ['#3ff0c8', '#a98bff', '#ffb547', '#ff6fae', '#5fd3ff'];
+const ACC = ACCENTS.map((c) => new THREE.Color(c));
 const FLOOR_Y = -1;
 const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
 const smooth = (a: number, b: number, x: number) => {
@@ -223,6 +226,9 @@ export class Engine {
   private wordmark!: THREE.Mesh;
   private underGlow!: THREE.PointLight;
   private letters: THREE.Mesh[] = [];
+  private lion!: THREE.Mesh;
+  private sealFloor!: THREE.Mesh;
+  private energy!: THREE.Points;
   private lettersG = new THREE.Group();
   private key!: THREE.DirectionalLight;
   private focusSpot!: THREE.SpotLight;
@@ -288,6 +294,7 @@ export class Engine {
     this.buildFx();
     this.buildCampus();
     this.buildLetters();
+    this.buildBrand();
 
     this.resize();
     addEventListener('resize', this.onResizeBound);
@@ -971,6 +978,54 @@ export class Engine {
     this.scene.add(this.lettersG);
   }
 
+  /* ───────────────────────── 한양 사자 홀로그램 + 바닥 교표 ───────────────────────── */
+  private buildBrand() {
+    const tl = new THREE.TextureLoader();
+    const lionTex = tl.load('/brand/lion-mask.png');
+    this.lion = new THREE.Mesh(
+      new THREE.PlaneGeometry(2.5, 2.5 * (805 / 800)),
+      new THREE.ShaderMaterial({
+        uniforms: { uMap: { value: lionTex }, uTime: { value: 0 }, uAmt: { value: 0 }, uC1: { value: new THREE.Color('#9fd0ff') }, uC2: { value: new THREE.Color('#3f7dff') } },
+        vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+        fragmentShader: `uniform sampler2D uMap; uniform float uTime; uniform float uAmt; uniform vec3 uC1; uniform vec3 uC2; varying vec2 vUv;
+          void main(){
+            float a = texture2D(uMap, vUv).a;
+            float scan = 0.75 + 0.25*sin(vUv.y*260.0 - uTime*6.0);
+            float sweep = smoothstep(0.08, 0.0, abs(fract(uTime*0.18) - (1.0 - vUv.y)))*1.5;
+            float flick = 0.92 + 0.08*sin(uTime*37.0)*sin(uTime*13.0);
+            vec3 c = mix(uC2, uC1, vUv.y) * (1.2 + sweep);
+            float k = a*scan*flick*uAmt;
+            gl_FragColor = vec4(c*k*1.4, k);
+          }`,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+      })
+    );
+    this.lion.position.set(0, 2.6, -6.6);
+    this.scene.add(this.lion);
+
+    const sealTex = tl.load('/brand/seal-white.png');
+    this.sealFloor = new THREE.Mesh(
+      new THREE.CircleGeometry(2.9, 96),
+      new THREE.MeshBasicMaterial({ map: sealTex, color: new THREE.Color('#7fb2ff').multiplyScalar(1.6), transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false })
+    );
+    this.sealFloor.rotation.x = -Math.PI / 2;
+    this.sealFloor.position.y = FLOOR_Y + 0.004;
+    this.scene.add(this.sealFloor);
+
+    // 배터리 셀에서 솟는 에너지 입자 (배터리 클로즈업용)
+    const n = 360;
+    const g = new THREE.BufferGeometry();
+    const seed = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) seed.set([(Math.random() - 0.5) * 2.5, Math.random(), (Math.random() - 0.5) * 1.05], i * 3);
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 3), 3).setUsage(THREE.DynamicDrawUsage));
+    g.userData.seed = seed;
+    this.energy = new THREE.Points(g, new THREE.PointsMaterial({ size: 0.05, map: dotTexture(), color: ACC[0].clone().multiplyScalar(2.5), transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }));
+    this.battery.g.add(this.energy);
+  }
+
   /* ───────────────────────── 캠퍼스: 서울 · ERICA 3D 맵 ───────────────────────── */
   private buildCampus() {
     const clusters = [
@@ -1065,21 +1120,24 @@ export class Engine {
       const lift = i - 1 === S.focus ? fa : 0;
       const away = S.focus >= 0 && i - 1 !== S.focus ? fa : 0;
       if (p.g.userData.s0 === undefined) p.g.userData.s0 = p.g.scale.x;
-      p.g.position.copy(p.base).addScaledVector(p.off, ei).addScaledVector(p.off.clone().normalize(), 0.5 * lift + 4.5 * away);
+      p.g.position.copy(p.base).addScaledVector(p.off, ei).addScaledVector(p.off.clone().normalize(), 0.5 * lift);
+      p.g.position.y -= 1.2 * away * away;
       p.g.position.y += Math.sin(t * 1.2 + i * 1.7) * 0.035 * ei;
       p.g.rotation.z = Math.sin(t * 0.7 + i) * 0.03 * ei;
       p.g.userData.turn = lift > 0.01 ? (p.g.userData.turn || 0) + dt * 0.45 : 0;
       p.g.rotation.y = p.g.userData.turn * lift;
-      p.g.scale.setScalar(p.g.userData.s0 * (1 + 0.3 * lift) * (1 - 0.6 * away));
+      p.g.scale.setScalar(Math.max(1e-4, p.g.userData.s0 * (1 + 0.3 * lift) * (1 - away)));
+      p.g.visible = away < 0.97;
     });
     const we = easeOut3(smooth(0.3, 0.9, e));
     this.wheels.forEach((w) => {
       const wl = w === this.wheels[0] && S.focus === 4 ? fa : 0;
       const wa = S.focus >= 0 && !(w === this.wheels[0] && S.focus === 4) ? fa : 0;
-      w.g.position.set(w.base.x + Math.sign(w.base.x) * (0.35 * we + 0.3 * wl + 3 * wa), w.base.y + Math.sin(t * 1.1 + w.base.x) * 0.03 * we + 0.15 * wl, w.base.z + w.side * (1.1 * we + 0.45 * wl + 3 * wa));
+      w.g.position.set(w.base.x + Math.sign(w.base.x) * (0.35 * we + 0.3 * wl), w.base.y + Math.sin(t * 1.1 + w.base.x) * 0.03 * we + 0.15 * wl - 1.0 * wa * wa, w.base.z + w.side * (1.1 * we + 0.45 * wl));
       w.g.userData.turn = wl > 0.01 ? (w.g.userData.turn || 0) + dt * 0.45 : 0;
       w.g.rotation.y = w.g.userData.turn * wl;
-      w.g.scale.setScalar(1 + 0.3 * wl);
+      w.g.scale.setScalar(Math.max(1e-4, (1 + 0.3 * wl) * (1 - wa)));
+      w.g.visible = wa < 0.97;
       const spinRate = 2 + S.launch * 60 + S.finale * 6 + (S.focus === 4 ? S.focusAmt * 3 : 0);
       (w.g.userData.spin as THREE.Group).rotation.z -= dt * spinRate;
     });
@@ -1121,11 +1179,26 @@ export class Engine {
     for (let i = 0; i < this.cells.count; i++) {
       const ix = Math.floor(i / 7);
       const w = Math.pow(0.5 + 0.5 * Math.sin(ix * 0.7 - t * 4), 6);
-      c.copy(SKY).multiplyScalar(0.18 + w * 2.2 * cellBoost);
+      // 클로즈업하면 셀이 민트→블루 그라데이션으로 충전되듯 차오른다
+      const fb = focusOn(0);
+      const col = SKY.clone().lerp(ACC[0].clone().lerp(new THREE.Color('#3f7dff'), ix / 13), fb);
+      const charge = fb > 0 ? (ix / 13 < ((t * 0.35) % 1.2) ? 1 : 0.25) : 1;
+      c.copy(col).multiplyScalar((0.18 + w * 2.2 * cellBoost) * (1 - fb) + fb * (0.18 + 0.7 * charge + w * 0.35));
       this.cells.setColorAt(i, c);
     }
     this.cells.instanceColor!.needsUpdate = true;
-    this.lid.position.y = 0.15 + focusOn(0) * 0.3;
+    this.lid.position.y = 0.15 + focusOn(0) * 0.25;
+    this.lid.rotation.x = -focusOn(0) * 0.5; // 덮개가 경첩처럼 열린다
+    {
+      const ep = this.energy.geometry.attributes.position as THREE.BufferAttribute;
+      const seed = this.energy.geometry.userData.seed as Float32Array;
+      for (let i = 0; i < ep.count; i++) {
+        const u = (seed[i * 3 + 1] + t * 0.35) % 1;
+        ep.setXYZ(i, seed[i * 3] + Math.sin(t + i) * 0.02, 0.12 + u * 1.3, seed[i * 3 + 2]);
+      }
+      ep.needsUpdate = true;
+      (this.energy.material as THREE.PointsMaterial).opacity = focusOn(0) * 0.6;
+    }
 
     // 라이다
     this.lidarSpin.rotation.y += dt * (6 + focusOn(1) * 10);
@@ -1251,10 +1324,27 @@ export class Engine {
       (this.arcFlow.material as THREE.PointsMaterial).opacity = smooth(0.4, 0.9, S.campus) * fall;
     }
 
+    /* 사자 홀로그램 + 바닥 교표 */
+    {
+      const amt = Math.max(S.hero, smooth(0.4, 1, S.finale));
+      const lionAmt = S.hero; // 마지막 화면은 제목과 겹치므로 사자는 첫 화면에서만
+      const lm = this.lion.material as THREE.ShaderMaterial;
+      lm.uniforms.uTime.value = t;
+      lm.uniforms.uAmt.value = lionAmt * 0.8;
+      this.lion.visible = lionAmt > 0.01;
+      this.lion.position.y = 1.65 + Math.sin(t * 0.8) * 0.06 + (1 - lionAmt) * 1.5;
+      this.lion.rotation.y = Math.sin(t * 0.35) * 0.18;
+      (this.sealFloor.material as THREE.MeshBasicMaterial).opacity = amt * 0.32;
+      this.sealFloor.visible = amt > 0.01;
+      this.sealFloor.rotation.z = t * 0.05;
+      this.sealFloor.position.x = this.car.position.x * 0.0;
+    }
+
     /* 입체 글자: 첫 화면과 마지막 화면에서만 바닥에서 솟아오른다 */
     {
       const amt = Math.max(S.hero, smooth(0.3, 0.9, S.finale));
       this.lettersG.visible = amt > 0.01;
+      this.lettersG.scale.setScalar(portrait ? 0.6 : 1); // 세로 화면에선 글자가 잘리지 않게
       this.letters.forEach((m, i) => {
         const k = easeOut3(smooth(i * 0.06, 0.6 + i * 0.06, amt));
         m.position.y = -2.2 * (1 - k) + Math.sin(t * 1.1 + i * 0.7) * 0.03 * k;
@@ -1292,7 +1382,13 @@ export class Engine {
         if ((m as THREE.ShaderMaterial).uniforms) (m as THREE.ShaderMaterial).uniforms.uA.value = fa;
         else m.opacity = fa;
       });
-      this.focusSpot.intensity = [18, 40, 40, 40, 26][S.focus] * fa;
+      this.focusSpot.intensity = [22, 40, 40, 40, 26][S.focus] * fa;
+      this.focusSpot.color.copy(ACC[S.focus]).lerp(new THREE.Color('#ffffff'), 0.45);
+      this.holoMats.forEach((m) => {
+        const mm = m as any;
+        if (mm.uniforms) mm.uniforms.uColor.value.copy(ACC[S.focus]);
+        else mm.color.copy(ACC[S.focus]).multiplyScalar(2.6);
+      });
       this.focusSpot.position.copy(gp).add(new THREE.Vector3(0.8, 3.2, 1.6));
       this.focusSpot.target.position.copy(gp);
     } else {
@@ -1318,7 +1414,7 @@ export class Engine {
         new THREE.Vector3(0.9, 0.3, 1.0),
         new THREE.Vector3(0.55, 0.25, 1.2),
       ];
-      const dist = [6.0, 2.9, 3.6, 3.3, 3.5][S.focus];
+      const dist = [7.2, 2.9, 3.6, 3.3, 3.5][S.focus];
       const fpos = fp.clone().addScaledVector(dirs[S.focus].normalize(), dist);
       const k = easeOut3(S.focusAmt);
       pos.lerp(fpos, k);
