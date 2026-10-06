@@ -103,20 +103,6 @@ h2 { font-size: clamp(34px, 4.8vw, 72px); font-weight: 800; line-height: 1.1; le
 .name__steps li { flex: 1; padding-top: 10px; border-top: 2px solid rgba(255, 255, 255, 0.15); font-family: var(--display); font-size: 11px; letter-spacing: 0.16em; color: var(--muted); transition: color 0.4s, border-color 0.4s; }
 .name__steps li.done { border-color: rgba(143, 227, 255, 0.45); }
 .name__steps li.on { border-color: var(--cyan); color: #fff; }
-.coin { position: relative; transform-style: preserve-3d; will-change: transform; }
-.coin--big { width: clamp(240px, 26vw, 400px); aspect-ratio: 1; }
-.coin--small { width: 96px; aspect-ratio: 1; animation: spin 7s linear infinite; }
-@keyframes spin { to { transform: rotateY(360deg); } }
-.coin__face, .coin__back { position: absolute; inset: 0; border-radius: 50%; backface-visibility: hidden; }
-.coin__face { width: 100%; height: 100%; transform: translateZ(1px); filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.2)); }
-.coin__face::after { content: ''; }
-.coin__back { transform: translateZ(-16px) rotateY(180deg); overflow: hidden; background: #1c3d6b; display: grid; place-items: center; box-shadow: inset 0 0 0 6px #2f5d9c; }
-.coin--small .coin__back { transform: translateZ(-10px) rotateY(180deg); }
-.coin__back img { width: 118%; height: 118%; object-fit: cover; object-position: 50% 30%; }
-.coin__edge { position: absolute; inset: 0; border-radius: 50%; background: linear-gradient(90deg, #1b3f78, #6f9fe8 50%, #1b3f78); }
-.coin-shadow { position: absolute; bottom: -12%; width: 70%; height: 30px; border-radius: 50%; background: radial-gradient(closest-side, rgba(14, 40, 90, 0.35), transparent); filter: blur(6px); animation: shadow 4s ease-in-out infinite; }
-@keyframes float { 50% { translate: 0 -16px; } }
-@keyframes shadow { 50% { transform: scale(0.85); opacity: 0.7; } }
 /* tech */
 .tech { pointer-events: none; }
 .tech__intro { position: absolute; left: var(--gutter); top: 50%; transform: translateY(-50%); max-width: 560px; transition: opacity 0.6s; }
@@ -147,23 +133,25 @@ h2 { font-size: clamp(34px, 4.8vw, 72px); font-weight: 800; line-height: 1.1; le
 .launch__title span:last-child { color: transparent; -webkit-text-stroke: 2px var(--sky); transform: skewX(-10deg); transform-origin: left; }
 .launch__sub { margin-top: 18px; font-size: 18px; font-weight: 700; color: var(--muted); }
 
-/* values — 3D 프리즘 */
-.values { height: 440vh; background: radial-gradient(70% 60% at 50% 50%, #0b2350, var(--bg)); }
-.values__fig { position: absolute; top: 96px; left: var(--gutter); }
-.prism-stage { position: absolute; inset: 0; perspective: 1800px; display: grid; place-items: center; }
-.prism { --h: min(50vh, 440px); position: relative; width: min(86vw, 1180px); height: var(--h); transform-style: preserve-3d; will-change: transform; }
-.pface { position: absolute; inset: 0; backface-visibility: hidden; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: clamp(16px, 4vw, 60px); padding: 0 clamp(20px, 5%, 70px);
-  background: linear-gradient(115deg, var(--c2), #061a3a 72%); background-image: linear-gradient(115deg, color-mix(in srgb, var(--c2) 85%, transparent), rgba(6, 26, 58, 0.96) 72%), var(--grid); background-size: auto, 24px 24px, 24px 24px, 120px 120px, 120px 120px;
-  border: 1px solid rgba(143, 227, 255, 0.35); box-shadow: inset 0 0 120px rgba(0, 0, 0, 0.35); }
-.pface__no { font-family: var(--display); font-weight: 700; font-size: clamp(40px, 5vw, 80px); color: transparent; -webkit-text-stroke: 1.5px var(--c1); align-self: start; margin-top: 6%; }
-.pface h2 { font-family: var(--han); font-weight: 900; font-size: clamp(90px, 15vw, 230px); line-height: 1; letter-spacing: -0.04em; color: #fff; text-shadow: 6px 6px 0 color-mix(in srgb, var(--c2) 70%, #000), 0 20px 50px rgba(0, 0, 0, 0.4); }
-.pface__side { max-width: 280px; text-align: right; }
-.pface__side b { display: block; font-family: var(--display); font-size: clamp(22px, 2.4vw, 36px); letter-spacing: -0.03em; color: var(--c1); text-transform: uppercase; }
-.pface__side p { margin-top: 10px; font-size: 14px; line-height: 1.7; color: var(--muted); }
-.values__nav { position: absolute; left: var(--gutter); right: var(--gutter); bottom: 30px; list-style: none; display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
-.values__nav li { padding-top: 12px; border-top: 2px solid rgba(255, 255, 255, 0.14); font-size: 13px; color: var(--muted); display: flex; gap: 8px; transition: color 0.4s, border-color 0.4s; }
-.values__nav li span { font-family: var(--display); font-size: 11px; color: var(--sky); }
-.values__nav li.on { color: #fff; border-color: var(--cyan); }
+/* values — 덕목 인덱스 (가는 서체, 진행선, 은은한 빛) */
+.values { --v1: #7fb2ff; --v2: #1f4fc4; height: 440vh; background: #04060c; }
+.values__inner { display: grid; grid-template-columns: minmax(0, 0.32fr) minmax(0, 1fr); grid-template-rows: 1fr auto; column-gap: clamp(24px, 5vw, 80px); padding: 120px var(--gutter) 56px; }
+.values__glow { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(45% 55% at 72% 42%, color-mix(in srgb, var(--v2) 55%, transparent), transparent 70%), radial-gradient(30% 35% at 85% 70%, color-mix(in srgb, var(--v1) 25%, transparent), transparent 70%); transition: background 1.2s var(--ease); filter: blur(10px); }
+.values__head { position: relative; align-self: start; }
+.values__head p { margin-top: 18px; font-size: 15px; line-height: 1.7; color: var(--muted); }
+.vindex { position: relative; list-style: none; align-self: center; border-top: 1px solid rgba(255, 255, 255, 0.12); }
+.vindex li { --fill: 0; position: relative; display: grid; grid-template-columns: 56px 1fr auto; align-items: baseline; padding: clamp(10px, 1.6vh, 20px) 0; border-bottom: 1px solid rgba(255, 255, 255, 0.12); color: rgba(238, 243, 255, 0.28); transition: color 0.6s var(--ease); }
+.vindex__no { font-family: var(--display); font-size: 12px; letter-spacing: 0.1em; }
+.vindex__ko { font-family: var(--sans); font-weight: 200; font-size: clamp(48px, 7.4vw, 124px); line-height: 1; letter-spacing: -0.04em; transition: font-weight 0.6s var(--ease), transform 0.8s var(--ease); transform-origin: left; }
+.vindex__en { font-family: var(--display); font-size: clamp(12px, 1vw, 15px); letter-spacing: 0.22em; text-transform: uppercase; }
+.vindex__bar { position: absolute; left: 0; bottom: -1px; height: 1px; width: calc(var(--fill) * 100%); background: linear-gradient(90deg, var(--v2), var(--v1)); box-shadow: 0 0 12px var(--v1); }
+.vindex li.on { color: #fff; }
+.vindex li.on .vindex__ko { font-weight: 500; transform: translateX(10px); }
+.vindex li.on .vindex__no, .vindex li.on .vindex__en { color: var(--v1); }
+.vindex li.done { color: rgba(238, 243, 255, 0.45); }
+.values__quote { position: relative; grid-column: 2; justify-self: end; max-width: 420px; text-align: right; margin-top: 26px; animation: swap 0.8s var(--ease) both; }
+.values__quote span { font-family: var(--display); font-size: 11px; letter-spacing: 0.24em; text-transform: uppercase; color: var(--v1); }
+.values__quote p { margin-top: 10px; font-size: clamp(17px, 1.5vw, 22px); line-height: 1.6; font-weight: 300; }
 
 /* history — 입체 숫자 */
 .history { height: 380vh; background-color: #050a16; background-image: var(--grid); background-size: 24px 24px, 24px 24px, 120px 120px, 120px 120px; }
@@ -223,7 +211,6 @@ h2 { font-size: clamp(34px, 4.8vw, 72px); font-weight: 800; line-height: 1.1; le
 /* finale — 3D 무대 위 */
 .finale { min-height: 110svh; display: flex; flex-direction: column; }
 .finale__inner { flex: 1; display: flex; flex-direction: column; align-items: center; text-align: center; padding: 18vh var(--gutter) 0; gap: 26px; }
-.finale__inner .coin--small { margin-bottom: 4px; }
 .finale__inner h2 { font-size: clamp(34px, 4.6vw, 72px); text-shadow: 0 10px 40px rgba(0, 0, 0, 0.6); }
 .footer { position: relative; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 18px var(--gutter) 26px; font-size: 11px; color: var(--muted); border-top: 1px solid var(--line); background: rgba(3, 5, 12, 0.7); }
 .footer a { color: var(--sky); }
@@ -242,11 +229,9 @@ h2 { font-size: clamp(34px, 4.8vw, 72px); font-weight: 800; line-height: 1.1; le
   .spec__no { font-size: 38px; }
   .spec__body { font-size: 13px; line-height: 1.6; }
   .tag b { font-size: 10px; padding: 4px 7px; }
-  .prism { width: 92vw; --h: 46vh; }
-  .pface { grid-template-columns: 1fr; text-align: center; justify-items: center; align-content: center; gap: 10px; }
-  .pface__no { display: none; }
-  .pface__side { text-align: center; }
-  .values__nav li { font-size: 11px; }
+  .values__inner { grid-template-columns: 1fr; padding-top: 100px; }
+  .vindex li { grid-template-columns: 34px 1fr auto; }
+  .values__quote { grid-column: 1; justify-self: start; text-align: left; }
   .era__body { grid-template-columns: 1fr; }
   .iso { left: 50%; top: 52%; transform: rotateX(58deg) rotateZ(-42deg) scale(0.6); }
   .colleges__now { top: auto; bottom: 16px; left: var(--gutter); right: var(--gutter); width: auto; transform: none; padding: 16px; }

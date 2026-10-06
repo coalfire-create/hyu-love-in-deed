@@ -12,6 +12,7 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
 import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
 import archivo from '../assets/archivo-black.typeface.json';
+import lionShapes from '../assets/lion-shapes.json';
 
 export interface EngineState {
   hero: number; // 1 = 첫 화면
@@ -228,8 +229,9 @@ export class Engine {
   private wordmark!: THREE.Mesh;
   private underGlow!: THREE.PointLight;
   private letters: THREE.Mesh[] = [];
-  private lion!: THREE.Mesh;
-  private sealFloor!: THREE.Mesh;
+  private lionMats: THREE.Material[] = [];
+  private sparks2!: THREE.Points;
+  private roarWave!: THREE.Mesh;
   private energy!: THREE.Points;
   private emblemG = new THREE.Group();
   private coin = new THREE.Group();
@@ -985,43 +987,8 @@ export class Engine {
     this.scene.add(this.lettersG);
   }
 
-  /* ───────────────────────── 한양 사자 홀로그램 + 바닥 교표 ───────────────────────── */
+  /* ───────────────────────── 배터리 클로즈업용 에너지 입자 ───────────────────────── */
   private buildBrand() {
-    const tl = new THREE.TextureLoader();
-    const lionTex = tl.load('/brand/lion-mask.png');
-    this.lion = new THREE.Mesh(
-      new THREE.PlaneGeometry(2.5, 2.5 * (805 / 800)),
-      new THREE.ShaderMaterial({
-        uniforms: { uMap: { value: lionTex }, uTime: { value: 0 }, uAmt: { value: 0 }, uC1: { value: new THREE.Color('#9fd0ff') }, uC2: { value: new THREE.Color('#3f7dff') } },
-        vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
-        fragmentShader: `uniform sampler2D uMap; uniform float uTime; uniform float uAmt; uniform vec3 uC1; uniform vec3 uC2; varying vec2 vUv;
-          void main(){
-            float a = texture2D(uMap, vUv).a;
-            float scan = 0.75 + 0.25*sin(vUv.y*260.0 - uTime*6.0);
-            float sweep = smoothstep(0.08, 0.0, abs(fract(uTime*0.18) - (1.0 - vUv.y)))*1.5;
-            float flick = 0.92 + 0.08*sin(uTime*37.0)*sin(uTime*13.0);
-            vec3 c = mix(uC2, uC1, vUv.y) * (1.2 + sweep);
-            float k = a*scan*flick*uAmt;
-            gl_FragColor = vec4(c*k*1.4, k);
-          }`,
-        transparent: true,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending,
-        side: THREE.DoubleSide,
-      })
-    );
-    this.lion.position.set(0, 2.6, -6.6);
-    this.scene.add(this.lion);
-
-    const sealTex = tl.load('/brand/seal-white.png');
-    this.sealFloor = new THREE.Mesh(
-      new THREE.CircleGeometry(2.9, 96),
-      new THREE.MeshBasicMaterial({ map: sealTex, color: new THREE.Color('#7fb2ff').multiplyScalar(1.6), transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false })
-    );
-    this.sealFloor.rotation.x = -Math.PI / 2;
-    this.sealFloor.position.y = FLOOR_Y + 0.004;
-    this.scene.add(this.sealFloor);
-
     // 배터리 셀에서 솟는 에너지 입자 (배터리 클로즈업용)
     const n = 360;
     const g = new THREE.BufferGeometry();
@@ -1033,50 +1000,68 @@ export class Engine {
     this.battery.g.add(this.energy);
   }
 
-  /* ───────────────────────── 교표 무대: 공중에 뜬 거대한 3D 코인 (앞 교표 · 뒤 사자) ───────────────────────── */
+  /* ───────────────────────── 사자 무대: 엠블럼 실루엣을 입체로 세운 3D 사자 ───────────────────────── */
   private buildEmblem() {
-    const tl = new THREE.TextureLoader();
-    const sealTex = tl.load('/brand/seal.png');
-    sealTex.colorSpace = THREE.SRGBColorSpace;
-    sealTex.anisotropy = 8;
-    sealTex.center.set(0.5, 0.5);
-    sealTex.rotation = Math.PI / 2; // 원기둥 뚜껑 UV가 90° 돌아가 있어 바로 세운다
-    const lionTex = tl.load('/brand/lion-blue.png');
-    lionTex.colorSpace = THREE.SRGBColorSpace;
-    lionTex.anisotropy = 8;
-    lionTex.center.set(0.5, 0.5);
-    lionTex.repeat.set(0.92, 0.92); // 살짝 확대
-    lionTex.rotation = Math.PI / 2;
-    // 테두리 톱니(리딩) 범프
-    const c = document.createElement('canvas');
-    c.width = 512;
-    c.height = 8;
-    const g = c.getContext('2d')!;
-    for (let x = 0; x < 512; x += 4) {
-      g.fillStyle = x % 8 ? '#000' : '#fff';
-      g.fillRect(x, 0, 4, 8);
-    }
-    const reed = new THREE.CanvasTexture(c);
-    reed.wrapS = THREE.RepeatWrapping;
-    reed.repeat.set(6, 1);
-    const R = 1.7, T = 0.26;
-    const edge = new THREE.MeshPhysicalMaterial({ color: '#9fb8e6', metalness: 1, roughness: 0.22, bumpMap: reed, bumpScale: 2, envMapIntensity: 1.8 });
-    const front = new THREE.MeshPhysicalMaterial({ map: sealTex, color: '#a9b6cf', metalness: 0.05, roughness: 0.7, clearcoat: 0.15, clearcoatRoughness: 0.4, envMapIntensity: 0.35 });
-    const back = new THREE.MeshPhysicalMaterial({ map: lionTex, color: '#a3b2cf', metalness: 0.05, roughness: 0.7, clearcoat: 0.15, clearcoatRoughness: 0.4, envMapIntensity: 0.35 });
-    const body = new THREE.Mesh(new THREE.CylinderGeometry(R, R, T, 160, 1), [edge, front, back]);
-    body.rotation.x = Math.PI / 2; // 윗면(교표)이 +z, 아랫면(사자)이 -z 를 보게
-    body.castShadow = true;
-    const rimMat = new THREE.MeshPhysicalMaterial({ color: '#c9d8f5', metalness: 1, roughness: 0.15, envMapIntensity: 2 });
-    for (const z of [T / 2, -T / 2]) {
-      const rim = new THREE.Mesh(new THREE.TorusGeometry(R - 0.02, 0.05, 16, 160), rimMat);
-      rim.position.z = z;
-      rim.castShadow = true;
-      this.coin.add(rim);
-    }
-    this.coin.add(body);
-    const halo = new THREE.Mesh(new THREE.TorusGeometry(R + 0.35, 0.006, 6, 200), glow(SKY, 3));
-    this.coin.userData.halo = halo;
-    this.emblemG.add(this.coin, halo);
+    // 엠블럼 윤곽(OpenCV로 추출한 다각형)을 그대로 압출 → 숨 쉬고, 갈기가 출렁이고, 턱을 벌려 포효한다
+    const shapes = (lionShapes as { outer: number[][]; holes: number[][][] }[]).map((pc) => {
+      const sh = new THREE.Shape(pc.outer.map(([x, y]) => new THREE.Vector2(x, y)));
+      pc.holes.forEach((h) => sh.holes.push(new THREE.Path(h.map(([x, y]) => new THREE.Vector2(x, y)))));
+      return sh;
+    });
+    const geo = new THREE.ExtrudeGeometry(shapes, { depth: 0.1, bevelEnabled: true, bevelThickness: 0.025, bevelSize: 0.006, bevelSegments: 4, curveSegments: 1 });
+    geo.translate(0, 0, -0.05);
+    geo.computeVertexNormals();
+    const deform = `
+      uniform float uT; uniform float uRoar;
+      vec3 lionDeform(vec3 p){
+        p.xy *= 1.0 + 0.012*sin(uT*1.6);
+        float mane = smoothstep(-0.05, 0.35, p.x + p.y*0.6);
+        p.x += sin(uT*2.2 + p.y*10.0)*0.012*mane;
+        p.y += cos(uT*1.8 + p.x*9.0)*0.010*mane;
+        p.z += sin(uT*2.6 + p.x*7.0 + p.y*6.0)*0.06*mane;
+        float jaw = smoothstep(-0.03, -0.1, p.y) * smoothstep(-0.05, -0.15, p.x);
+        vec2 piv = vec2(-0.1, -0.02);
+        float a = uRoar*0.28*jaw;
+        vec2 d = p.xy - piv;
+        p.xy = piv + vec2(d.x*cos(a) - d.y*sin(a), d.x*sin(a) + d.y*cos(a));
+        return p;
+      }`;
+    const patch = (m: THREE.Material) => {
+      m.onBeforeCompile = (sh) => {
+        sh.uniforms.uT = { value: 0 };
+        sh.uniforms.uRoar = { value: 0 };
+        m.userData.sh = sh;
+        sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\n' + deform).replace('#include <begin_vertex>', 'vec3 transformed = lionDeform(vec3(position));');
+      };
+      this.lionMats.push(m);
+      return m;
+    };
+    const silver = patch(new THREE.MeshPhysicalMaterial({ color: '#b8c6de', metalness: 0.85, roughness: 0.34, clearcoat: 0.6, clearcoatRoughness: 0.2, envMapIntensity: 0.9 }));
+    const blueSide = patch(new THREE.MeshPhysicalMaterial({ color: '#1f5fbf', metalness: 0.8, roughness: 0.3, envMapIntensity: 1.2 }));
+    const lion = new THREE.Mesh(geo, [silver, blueSide]); // 앞뒤 면은 은색, 옆면은 한양 블루
+    lion.castShadow = true;
+    // 뒤에 깔린 발광 실루엣 — 사자를 감싸는 네온 후광
+    const back = new THREE.Mesh(geo, patch(new THREE.MeshBasicMaterial({ color: SKY.clone().multiplyScalar(0.7), toneMapped: false })));
+    back.position.z = -0.09;
+    back.scale.set(1.025, 1.025, 0.3);
+    this.coin.add(back, lion);
+    this.coin.scale.setScalar(3.4);
+
+    // 갈기에서 흩날리는 불꽃 입자 (사자 좌표계)
+    const ns = 320;
+    const seed = new Float32Array(ns * 3);
+    for (let i = 0; i < ns; i++) seed.set([Math.random() * 0.4 - 0.02, Math.random() * 0.8 - 0.35, Math.random()], i * 3);
+    const sg = new THREE.BufferGeometry();
+    sg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(ns * 3), 3).setUsage(THREE.DynamicDrawUsage));
+    sg.userData.seed = seed;
+    this.sparks2 = new THREE.Points(sg, new THREE.PointsMaterial({ size: 0.012, map: dotTexture(), color: SKY.clone().multiplyScalar(2.6), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }));
+    this.coin.add(this.sparks2);
+    // 포효할 때 입 앞에서 퍼지는 음파 링
+    this.roarWave = new THREE.Mesh(new THREE.RingGeometry(0.9, 1, 96), new THREE.MeshBasicMaterial({ color: SKY.clone().multiplyScalar(2.5), transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }));
+    this.roarWave.position.set(-0.42, -0.1, 0.05);
+    this.roarWave.rotation.y = Math.PI / 2.4;
+    this.coin.add(this.roarWave);
+    this.emblemG.add(this.coin);
 
     // 코인 주위를 도는 입자 고리 두 개
     const n = this.mobile ? 500 : 1100;
@@ -1408,40 +1393,42 @@ export class Engine {
       (this.arcFlow.material as THREE.PointsMaterial).opacity = smooth(0.4, 0.9, S.campus) * fall;
     }
 
-    /* 교표 무대 */
+    /* 사자 무대 */
     const em = S.emblem || 0, ep = S.emblemP || 0;
     this.emblemG.visible = em > 0.001;
     if (this.emblemG.visible) {
-      // 사자 면(뒤) → 교표 면(앞)으로 뒤집히고, 마지막엔 비스듬히 기울어 두께를 보여준다
-      const flip = easeOut3(smooth(0.28, 0.5, ep));
+      // 1단계: 정면에서 포효 → 2단계: 3/4 각도로 돌아 두께를 보여줌 → 3단계: 비스듬히 물러남
+      const turn = easeOut3(smooth(0.3, 0.55, ep));
       const lean = smooth(0.66, 0.9, ep);
-      this.coin.rotation.y = Math.PI * (1 - flip) + Math.sin(t * 0.6) * 0.18 * (1 - lean) - 0.75 * lean + this.mouseS.x * 0.25;
-      this.coin.rotation.x = Math.sin(t * 0.5) * 0.06 + 0.25 * lean - this.mouseS.y * 0.15;
-      this.coin.position.y = Math.sin(t * 1.1) * 0.08 + (1 - smooth(0, 0.6, em)) * -1.5;
+      const roar = Math.max(smooth(0.04, 0.12, ep) * (1 - smooth(0.22, 0.3, ep)), Math.pow(Math.max(0, Math.sin(t * 0.8)), 10) * 0.7);
+      this.lionMats.forEach((m) => {
+        const sh = m.userData.sh;
+        if (sh) {
+          sh.uniforms.uT.value = t;
+          sh.uniforms.uRoar.value = roar;
+        }
+      });
+      this.coin.rotation.y = Math.sin(t * 0.5) * 0.2 * (1 - turn) - 0.6 * turn + 0.25 * lean + this.mouseS.x * 0.3;
+      this.coin.rotation.x = Math.sin(t * 0.45) * 0.05 - this.mouseS.y * 0.15;
+      this.coin.position.y = Math.sin(t * 1.1) * 0.07 + (1 - smooth(0, 0.6, em)) * -1.5;
       this.coin.position.x = -0.9 * lean;
-      const halo = this.coin.userData.halo as THREE.Mesh;
-      halo.rotation.set(Math.PI / 2 + 0.3, 0, t * 0.2);
-      halo.position.copy(this.coin.position);
+      // 갈기 불꽃
+      const sp = this.sparks2.geometry.attributes.position as THREE.BufferAttribute;
+      const seed = this.sparks2.geometry.userData.seed as Float32Array;
+      for (let i = 0; i < sp.count; i++) {
+        const u = (seed[i * 3 + 2] + t * 0.25) % 1;
+        sp.setXYZ(i, seed[i * 3] + u * 0.35, seed[i * 3 + 1] + u * 0.18 + Math.sin(t * 2 + i) * 0.01, Math.sin(i) * 0.08);
+      }
+      sp.needsUpdate = true;
+      // 포효 음파
+      const rw = this.roarWave.material as THREE.MeshBasicMaterial;
+      const wv = (t * 1.6) % 1;
+      this.roarWave.scale.setScalar(0.05 + wv * 0.45);
+      rw.opacity = roar * (1 - wv) * 0.9;
       this.orbit.rotation.y = t * 0.12;
-      this.emblemSpot.intensity = 10 * em;
+      this.emblemSpot.intensity = 8 * em;
       this.emblemSpot.target.position.copy(this.coin.position);
-      (this.emblemG.userData.rimL as THREE.PointLight).intensity = 10 * em;
-    }
-
-    /* 사자 홀로그램 + 바닥 교표 */
-    {
-      const amt = Math.max(S.hero, smooth(0.4, 1, S.finale));
-      const lionAmt = S.hero; // 마지막 화면은 제목과 겹치므로 사자는 첫 화면에서만
-      const lm = this.lion.material as THREE.ShaderMaterial;
-      lm.uniforms.uTime.value = t;
-      lm.uniforms.uAmt.value = lionAmt * 0.8;
-      this.lion.visible = lionAmt > 0.01;
-      this.lion.position.y = 1.65 + Math.sin(t * 0.8) * 0.06 + (1 - lionAmt) * 1.5;
-      this.lion.rotation.y = Math.sin(t * 0.35) * 0.18;
-      (this.sealFloor.material as THREE.MeshBasicMaterial).opacity = amt * 0.32;
-      this.sealFloor.visible = amt > 0.01;
-      this.sealFloor.rotation.z = t * 0.05;
-      this.sealFloor.position.x = this.car.position.x * 0.0;
+      (this.emblemG.userData.rimL as THREE.PointLight).intensity = 16 * em;
     }
 
     /* 입체 글자: 첫 화면과 마지막 화면에서만 바닥에서 솟아오른다 */

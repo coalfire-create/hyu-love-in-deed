@@ -102,7 +102,7 @@ export default function App() {
   const tech = useRef<HTMLElement>(null);
   const launch = useRef<HTMLElement>(null);
   const values = useRef<HTMLElement | null>(null);
-  const prism = useRef<HTMLDivElement>(null);
+  const prism = useRef<HTMLOListElement>(null);
   const history = useRef<HTMLElement | null>(null);
   const track = useRef<HTMLDivElement>(null);
   const colleges = useRef<HTMLElement | null>(null);
@@ -135,8 +135,7 @@ export default function App() {
     addEventListener('pointermove', onMove);
     const io = new IntersectionObserver((es) => es.forEach((e) => e.isIntersecting && e.target.classList.add('in')), { threshold: 0.2 });
     document.querySelectorAll('.rv').forEach((el) => io.observe(el));
-    const faces = Array.from(prism.current!.children) as HTMLElement[];
-    const coins = Array.from(document.querySelectorAll<HTMLElement>('.coin'));
+    const rows = Array.from(prism.current!.children) as HTMLElement[];
     // 숫자 카운트업 (보일 때 한 번)
     const cio = new IntersectionObserver((es) => es.forEach((e) => {
       if (!e.isIntersecting) return;
@@ -178,19 +177,10 @@ export default function App() {
 
       if (tm.step !== lastStep) setStep((lastStep = tm.step));
 
-      // 漢陽 설계도: 마우스 따라 기울어지는 입체 글자
-      // 교표 코인: 천천히 돌면서 마우스 쪽으로 기운다 (앞=교표, 뒤=사자)
-      const now = performance.now() / 1000;
-      coins.forEach((cn) => (cn.style.transform = `rotateX(${(-mouse.sy * 18).toFixed(2)}deg) rotateY(${(now * 38 + mouse.sx * 40).toFixed(2)}deg)`));
-
-      // 덕목 프리즘: 스크롤에 따라 사각 기둥이 위로 굴러간다
-      const vp = smooth(0.04, 0.96, progress(values.current!)) * 3;
-      prism.current!.style.transform = `translateZ(calc(var(--h) / -2)) rotateX(${(vp * 90).toFixed(2)}deg) rotateY(${(mouse.sx * 10).toFixed(2)}deg)`;
-      faces.forEach((f, i) => {
-        const d = Math.abs(vp - i);
-        f.style.filter = `brightness(${Math.max(0.25, 1 - d * 0.75).toFixed(3)})`;
-      });
-      const v = Math.min(3, Math.round(vp));
+      // 덕목 인덱스: 지금 덕목 줄의 진행선이 차오른다
+      const vp = clamp01(progress(values.current!)) * 4;
+      const v = Math.min(3, Math.floor(vp));
+      rows.forEach((r, i) => r.style.setProperty('--fill', String(i < v ? 1 : i === v ? clamp01(vp - v) : 0)));
       if (v !== lastVirtue) setVirtue((lastVirtue = v));
 
       if (track.current) {
@@ -362,27 +352,28 @@ export default function App() {
           </div>
         </section>
 
-        {/* VALUES — 굴러가는 3D 프리즘 */}
-        <section className="values" id="values" ref={(el) => { values.current = el; addOpaque(el); }}>
+        {/* VALUES — 덕목 인덱스 */}
+        <section className="values" id="values" ref={(el) => { values.current = el; addOpaque(el); }} style={{ '--v1': VIRTUES[virtue].hue[0], '--v2': VIRTUES[virtue].hue[1] } as React.CSSProperties}>
           <div className="sticky values__inner">
-            <span className="fig values__fig">FIG. 03 — FOUR VIRTUES</span>
-            <div className="prism-stage">
-              <div className="prism" ref={prism}>
-                {VIRTUES.map((v, i) => (
-                  <div key={v.ko} className="pface" style={{ transform: `rotateX(${-i * 90}deg) translateZ(calc(var(--h) / 2))`, '--c1': v.hue[0], '--c2': v.hue[1] } as React.CSSProperties}>
-                    <span className="pface__no">0{i + 1}</span>
-                    <h2>{v.ko}</h2>
-                    <div className="pface__side">
-                      <b>{v.en}</b>
-                      <p>{v.d}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
+            <div className="values__glow" aria-hidden />
+            <div className="values__head">
+              <span className="fig">FIG. 04 — FOUR VIRTUES</span>
+              <p>한양인이 지켜 온<br />네 가지 덕목</p>
             </div>
-            <ol className="values__nav">
-              {VIRTUES.map((v, i) => <li key={v.ko} className={i === virtue ? 'on' : ''}><span>0{i + 1}</span>{v.ko} {v.en}</li>)}
+            <ol className="vindex" ref={prism}>
+              {VIRTUES.map((v, i) => (
+                <li key={v.ko} className={i === virtue ? 'on' : i < virtue ? 'done' : ''}>
+                  <span className="vindex__no">0{i + 1}</span>
+                  <span className="vindex__ko">{v.ko}</span>
+                  <span className="vindex__en">{v.en}</span>
+                  <i className="vindex__bar" />
+                </li>
+              ))}
             </ol>
+            <div className="values__quote" key={virtue}>
+              <span>{VIRTUES[virtue].en}</span>
+              <p>{VIRTUES[virtue].d}</p>
+            </div>
           </div>
         </section>
 
@@ -443,11 +434,6 @@ export default function App() {
         {/* FINALE — 3D 무대로 돌아온 차와 솟아오르는 글자 */}
         <section className="finale" id="apply" ref={finale}>
           <div className="finale__inner">
-            <div className="coin coin--small" aria-hidden>
-              <img className="coin__face" src="/brand/seal.png" alt="" />
-              {Array.from({ length: 8 }, (_, i) => <i key={i} className="coin__edge" style={{ transform: `translateZ(${-1 - i}px)` }} />)}
-              <div className="coin__back"><img src="/brand/lion-blue.png" alt="" /></div>
-            </div>
             <span className="fig">FIG. 07 — IGNITION</span>
             <h2>사랑의 실천자,<br />한양에서 시동을 겁니다.</h2>
             <a className="btn btn--blue btn--big" href="https://go.hanyang.ac.kr" target="_blank" rel="noopener">입학처 바로가기 →</a>
