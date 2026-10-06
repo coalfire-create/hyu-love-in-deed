@@ -133,26 +133,6 @@ export class Lion {
     );
     this.body.add(mesh(torso, hide, 0.02, 0, 0));
 
-    // 가슴에 단 교표 메달 — 금테 안에 실제 한양대 교표
-    {
-      const tex = new THREE.TextureLoader().load('/brand/seal.png');
-      tex.colorSpace = THREE.SRGBColorSpace;
-      tex.center.set(0.5, 0.5);
-      tex.rotation = Math.PI / 2;
-      const seal = new THREE.MeshPhysicalMaterial({ map: tex, metalness: 0.2, roughness: 0.35, clearcoat: 1 });
-      const medal = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 0.025, 48), [gold, seal, gold]);
-      medal.rotation.z = -Math.PI / 2;
-      medal.position.set(1.0, -0.1, 0);
-      const rim = new THREE.Mesh(new THREE.TorusGeometry(0.135, 0.012, 12, 64), gold);
-      rim.rotation.y = Math.PI / 2;
-      rim.position.copy(medal.position).add(new THREE.Vector3(0.01, 0, 0));
-      // 메달을 거는 금빛 고리
-      const loop = new THREE.Mesh(new THREE.TorusGeometry(0.04, 0.01, 8, 24), gold);
-      loop.rotation.y = Math.PI / 2;
-      loop.position.copy(medal.position).add(new THREE.Vector3(0, 0.16, 0));
-      this.body.add(medal, rim, loop);
-    }
-
     // 다리: 앞다리(어깨→팔꿈치→손목), 뒷다리(엉덩이→무릎→발목)
     const mkLeg = (front: boolean, side: number) => {
       const root = new THREE.Group();

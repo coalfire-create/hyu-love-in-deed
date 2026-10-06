@@ -247,6 +247,7 @@ export default function App() {
           <footer className="footer">
             <span>본 페이지는 Team Semicolon이 제작한 비공식 홍보 페이지입니다.</span>
             <span>공식 정보 · <a href="https://www.hanyang.ac.kr" target="_blank" rel="noopener">hanyang.ac.kr</a></span>
+            <span>3D 차량 모델 · Free Concept Car 025 by Unity Fan (Sketchfab, CC0)</span>
           </footer>
         </section>
       </main>

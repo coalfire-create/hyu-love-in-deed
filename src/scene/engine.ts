@@ -12,6 +12,8 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
 import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
 import archivo from '../assets/archivo-black.typeface.json';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { Lion, sampleSurface } from './lion';
 
 export interface EngineState {
@@ -99,7 +101,8 @@ function dotTexture() {
   return new THREE.CanvasTexture(c);
 }
 
-const WHEEL_Y_ALL = -0.61;
+const WHEEL_Y_ALL = -0.573;
+const TRACK = 1.035;
 
 // 1차원 캣멀-롬(에르미트) 스플라인: [x, 값] 키들을 부드럽게 잇는다
 function spline(keys: [number, number][]) {
@@ -204,8 +207,8 @@ export class Engine {
   private scene = new THREE.Scene();
   private camera = new THREE.PerspectiveCamera(38, 1, 0.1, 200);
   // 첫 프레임부터 하이리온 얼굴을 정면으로
-  private camPos = new THREE.Vector3(0.8, 0.95, 7.6);
-  private camTgt = new THREE.Vector3(0.15, 0.8, 2.6);
+  private camPos = new THREE.Vector3(1.6, 1.7, 9.6);
+  private camTgt = new THREE.Vector3(0, -0.05, -2.4);
   private raf = 0;
   private timer = new THREE.Timer();
   private time = 0;
@@ -232,6 +235,8 @@ export class Engine {
   private edgeMat!: THREE.LineBasicMaterial;
   private rim!: THREE.ShaderMaterial;
   private bodyGlows: THREE.MeshBasicMaterial[] = [];
+  // 실사 차체(GLB)의 유리·트림 재질 — X-RAY 때 도장과 함께 비워진다
+  private shellMats: { m: THREE.MeshStandardMaterial; o: number }[] = [];
   private cells!: THREE.InstancedMesh;
   private lid!: THREE.Mesh;
   private lidarSpin!: THREE.Group;
@@ -252,7 +257,6 @@ export class Engine {
   private underGlow!: THREE.PointLight;
   private letters: THREE.Mesh[] = [];
   private lion!: Lion;
-  private faceLight!: THREE.SpotLight;
   private roarWave!: THREE.Mesh;
   private energy!: THREE.Points;
   private lettersG = new THREE.Group();
@@ -788,7 +792,7 @@ export class Engine {
       caliper.rotation.z = -0.6;
       g.add(disc, caliper);
       g.userData.spin = spin;
-      g.position.set(x, WHEEL_Y_ALL, side * 0.8);
+      g.position.set(x, WHEEL_Y_ALL, side * TRACK);
       g.traverse((o) => {
         if ((o as THREE.Mesh).isMesh) o.castShadow = true;
       });
@@ -814,6 +818,102 @@ export class Engine {
     wa.position.set(0, 0.42, 0);
     this.wheels[0].g.add(wa);
     this.parts.push({ g: this.wheels[0].g, base: this.wheels[0].base, off: new THREE.Vector3(0.35, 0, 1.1), delay: 0.3, anchor: wa });
+    this.loadRealCar();
+  }
+
+  /* 실사 차체: CC0 컨셉카 GLB를 불러와 기존 로프트 껍데기와 휠을 갈아 끼운다.
+     원본은 +z가 앞, 바닥이 y=0 — 앞뒤 바퀴 사이 중점을 원점에 두고 x축 방향으로 돌려 휠베이스(2.9)에 맞춘다. */
+  private loadRealCar() {
+    const loader = new GLTFLoader();
+    loader.setMeshoptDecoder(MeshoptDecoder);
+    loader.load(`${import.meta.env.BASE_URL}models/concept-car.glb`, (gltf) => {
+      const inner = gltf.scene;
+      inner.position.z = 2.209;
+      const real = new THREE.Group();
+      real.add(inner);
+      real.rotation.y = Math.PI / 2;
+      real.scale.setScalar(1.155);
+      real.position.y = FLOOR_Y;
+      real.updateMatrixWorld(true);
+
+      const spinMats = /rubber|tireProtector|rims|chrome/;
+      const fixedMats = /brakeCalipers|metal_1/;
+      const meshes: THREE.Mesh[] = [];
+      real.traverse((o) => (o as THREE.Mesh).isMesh && meshes.push(o as THREE.Mesh));
+
+      // 기존 절차적 휠·차체 껍데기는 숨긴다 (라벨 앵커와 회전 그룹은 그대로 쓴다)
+      this.body.g.children.forEach((c) => (c.visible = !(c as THREE.Mesh).isMesh && !(c as THREE.LineSegments).isLineSegments));
+      this.wheels.forEach((w) => {
+        (w.g.userData.spin as THREE.Group).children.forEach((c) => (c.visible = false));
+        w.g.children.forEach((c) => (c as THREE.Mesh).isMesh && (c.visible = false));
+      });
+
+      // 실차의 넓고 평평한 패널은 환경광을 그대로 비춰 하얗게 날아가니, 금속감을 낮추고 클리어코트로 광택을 낸다
+      this.paint.color.set('#0a3685');
+      this.paint.metalness = 0.5;
+      this.paint.roughness = 0.32;
+      this.paint.iridescence = 0;
+      this.paint.envMapIntensity = 0.85;
+      this.paint.needsUpdate = true;
+      const box = new THREE.Box3(), c = new THREE.Vector3(), m = new THREE.Matrix4();
+      for (const mesh of meshes) {
+        const mat = mesh.material as THREE.MeshStandardMaterial;
+        const name = mat.name || '';
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        if (spinMats.test(name) || fixedMats.test(name)) {
+          // 가장 가까운 휠 그룹으로 옮겨 붙여 회전·분해를 그대로 따르게 한다
+          box.setFromObject(mesh).getCenter(c);
+          const w = this.wheels.reduce((a, b) => (Math.hypot(b.base.x - c.x, b.base.z - c.z) < Math.hypot(a.base.x - c.x, a.base.z - c.z) ? b : a));
+          m.makeTranslation(-w.base.x, -w.base.y, -w.base.z).multiply(mesh.matrixWorld);
+          mesh.removeFromParent();
+          m.decompose(mesh.position, mesh.quaternion, mesh.scale);
+          (fixedMats.test(name) ? w.g : (w.g.userData.spin as THREE.Group)).add(mesh);
+          if (/brakeCalipers/.test(name)) mesh.material = glow(SKY, 1.6);
+          continue;
+        }
+        if (/body_color/.test(name)) {
+          mesh.material = this.paint;
+          continue;
+        }
+        if (/^light$/.test(name)) {
+          mesh.material = new THREE.MeshBasicMaterial({ color: new THREE.Color('#dff0ff').multiplyScalar(1.4), toneMapped: false, transparent: true });
+          this.bodyGlows.push(mesh.material as THREE.MeshBasicMaterial);
+          continue;
+        }
+        if (/^taillights$/.test(name)) {
+          mesh.material = new THREE.MeshBasicMaterial({ color: new THREE.Color('#ff3355').multiplyScalar(1.8), toneMapped: false, transparent: true });
+          this.bodyGlows.push(mesh.material as THREE.MeshBasicMaterial);
+          continue;
+        }
+        if (/plasticShiny/.test(name)) {
+          // 유리: 짙은 스모크 글라스
+          mesh.material = new THREE.MeshPhysicalMaterial({ color: '#05070c', metalness: 0.2, roughness: 0.03, clearcoat: 1, clearcoatRoughness: 0.02, envMapIntensity: 2.6 });
+        }
+        const mm = mesh.material as THREE.MeshStandardMaterial;
+        mm.transparent = true;
+        this.shellMats.push({ m: mm, o: mm.opacity });
+      }
+      // 오프닝 클리핑을 새 재질에도 건다
+      real.traverse((o) => {
+        const mat = (o as THREE.Mesh).material as THREE.Material | undefined;
+        if (mat) {
+          mat.clippingPlanes = [this.clip];
+          mat.clipShadows = true;
+        }
+      });
+      this.wheels.forEach((w) =>
+        w.g.traverse((o) => {
+          const mat = (o as THREE.Mesh).material as THREE.Material | undefined;
+          if (mat) {
+            mat.clippingPlanes = [this.clip];
+            mat.clipShadows = true;
+          }
+        })
+      );
+      this.body.g.add(real);
+      (window as unknown as { __carReady?: boolean }).__carReady = true;
+    });
   }
 
   /* ───────────────────────── 이펙트: 라이다 스캔·에너지 흐름·부스터·속도선 ───────────────────────── */
@@ -1018,16 +1118,9 @@ export class Engine {
   /* ───────────────────────── 사자 (오프닝 전용) ───────────────────────── */
   private buildLion() {
     this.lion = new Lion();
-    this.lion.root.scale.setScalar(1.1);
     this.scene.add(this.lion.root);
     this.lion.root.visible = false;
-    // (예전 사자의 음파 링 — 이제 마스코트가 자기 음파를 낸다)
     this.roarWave = new THREE.Mesh(new THREE.RingGeometry(0.9, 1, 8), new THREE.MeshBasicMaterial({ visible: false }));
-    // 첫 장면 얼굴을 밝게 비추는 정면 조명
-    this.faceLight = new THREE.SpotLight('#ffffff', 0, 14, 0.5, 0.6, 1.2);
-    this.faceLight.position.set(1.2, 2.6, 7);
-    this.faceLight.target.position.set(0, 0.2, 2.6);
-    this.scene.add(this.faceLight, this.faceLight.target);
   }
 
   /* ───────────────────────── 오프닝: 달려온 사자가 파편으로 터져 자동차로 다시 조립된다 ───────────────────────── */
@@ -1090,8 +1183,8 @@ export class Engine {
     /* 오프닝 시계: 스크롤을 내리면 바로 완성된 차로 넘어간다 */
     if (!this.introDone) {
       this.introT += dt;
-      if (S.hero < 0.97 && this.introT < 3.6) this.introT = 6.3;
-      if (this.introT >= 6.3) {
+      if (S.hero < 0.97 && this.introT < 2.6) this.introT = 5.3;
+      if (this.introT >= 5.3) {
         this.introDone = true;
         this.clip.constant = 1e4;
         this.shards.visible = false;
@@ -1123,7 +1216,7 @@ export class Engine {
     /* 오프닝: 사자 → 파편 → 자동차 */
     let introFlash = 0;
     if (!this.introDone) {
-      const IT = this.introT, tau = IT - 4.0;
+      const IT = this.introT, tau = IT - 3.0;
       const dir = new THREE.Vector3(Math.cos(this.carYaw), 0, -Math.sin(this.carYaw));
       if (tau >= 0 && !this.burst) {
         this.burst = true;
@@ -1227,10 +1320,14 @@ export class Engine {
     this.paint.opacity = lerp(1, 0.14, xr) * (1 - fq * 0.65);
     this.paint.depthWrite = xr < 0.5;
     this.glass.opacity = lerp(0.82, 0.1, xr);
+    this.shellMats.forEach((s) => {
+      s.m.opacity = s.o * this.paint.opacity;
+      s.m.depthWrite = xr < 0.5;
+    });
     this.edgeMat.opacity = xr * 0.85 * (1 - fq * 0.92);
     this.bodyGlows.forEach((m) => (m.opacity = 1 - fq * 0.85));
     // 오프닝 중엔 림 셰이더가 클리핑을 못 받으니, 차가 다 조립된 뒤에 켠다
-    this.rim.uniforms.uK.value = lerp(0.9, 1.8, xr) * (1 - fq * 0.8) * (this.introDone ? 1 : smooth(5.2, 5.9, this.introT));
+    this.rim.uniforms.uK.value = lerp(0.9, 1.8, xr) * (1 - fq * 0.8) * (this.introDone ? 1 : smooth(4.2, 4.9, this.introT));
 
     const focusOn = (i: number) => (S.focus === i ? S.focusAmt : 0);
 
@@ -1360,25 +1457,23 @@ export class Engine {
     this.underGlow.intensity = carVisible ? 0.5 + e * 2 + boost * 12 + introFlash * 30 : 0;
     this.underGlow.position.x = carX;
 
-    /* ───── 사자: 정면에서 카메라를 노려보며 포효하고, 돌아서 질주해 자동차로 변신 ───── */
+    /* ───── 사자: 화면 왼쪽 밖에서 질주해 들어와 차로 뛰어들며 변신 ───── */
     {
       const lion = this.lion;
       const L = lion.pose;
       const IT = this.introT;
-      const on = !this.introDone && IT < 4.0;
+      const on = !this.introDone && IT < 3.0;
       lion.root.visible = on;
-      this.faceLight.intensity = on ? 3 * (1 - smooth(2.6, 4.0, IT)) : 0;
       if (on) {
-        // 0~2.3초: 정면(+z)을 보고 버티고 서서 고개를 들어 포효 → 2.3초부터 돌아서 차 쪽(-z)으로 질주 → 3.6초 도약
-        const turn = smooth(2.2, 2.6, IT);
-        const run = smooth(2.4, 3.9, IT);
-        const leap = smooth(3.6, 4.0, IT);
-        lion.root.position.set(0, FLOOR_Y + Math.sin(Math.PI * leap) * 0.7, lerp(2.6, -0.4, run));
-        // 정면에서 살짝 비껴 서서(3/4) 얼굴과 갈기가 입체적으로 보이게
-        lion.root.rotation.set(0, lerp(-Math.PI / 2 + 0.38, Math.PI / 2, turn), 0);
-        L.speed = IT > 2.35 ? 5.5 / 1.1 : 0;
+        const dir = new THREE.Vector3(Math.cos(this.carYaw), 0, -Math.sin(this.carYaw));
+        const run = -15 + Math.max(0, IT - 0.2) * 5.2;
+        const leap = smooth(2.7, 3.0, IT);
+        lion.root.position.copy(dir).multiplyScalar(run).setY(FLOOR_Y + Math.sin(Math.PI * leap) * 0.9 * (IT > 2.7 ? 1 : 0));
+        lion.root.rotation.set(0, this.carYaw, 0);
+        lion.root.scale.setScalar(1.05);
+        L.speed = 5.2 / 1.05;
         L.gait = 1;
-        L.roar = smooth(0.6, 1.0, IT) * (1 - smooth(1.9, 2.2, IT));
+        L.roar = 0;
         L.look = 0;
         L.bow = 0;
         lion.update(dt);
@@ -1387,7 +1482,7 @@ export class Engine {
 
     /* 입체 글자: 첫 화면과 마지막 화면에서만 바닥에서 솟아오른다 */
     {
-      const amt = Math.max(S.hero * (this.introDone ? 1 : smooth(5.3, 6.3, this.introT)), smooth(0.3, 0.9, S.finale));
+      const amt = Math.max(S.hero * (this.introDone ? 1 : smooth(4.3, 5.3, this.introT)), smooth(0.3, 0.9, S.finale));
       this.lettersG.visible = amt > 0.01;
       this.lettersG.scale.setScalar(portrait ? 0.6 : 1); // 세로 화면에선 글자가 잘리지 않게
       this.letters.forEach((m, i) => {
@@ -1447,14 +1542,6 @@ export class Engine {
     const pos = new THREE.Vector3(1.6, 1.7, 9.6);
     const tgt = new THREE.Vector3(0, -0.05, -2.4);
     let fov = 36;
-    // 오프닝: 하이리온 얼굴을 정면에서 크게 → 달려가면 차가 보이는 자리로 물러난다
-    if (!this.introDone) {
-      const ic = 1 - smooth(2.3, 4.2, this.introT);
-      const push = smooth(0, 2.2, this.introT); // 천천히 다가가며 긴장감
-      pos.lerp(new THREE.Vector3(0.8, 0.95, lerp(7.6, 6.9, push)), ic);
-      tgt.lerp(new THREE.Vector3(0.15, 0.8, 2.6), ic);
-      fov = lerp(fov, 30, ic);
-    }
     pos.lerp(new THREE.Vector3(7.4, 3.8, 10.0), smooth(0, 0.6, e));
     tgt.lerp(new THREE.Vector3(-0.3, 0.4, 0.2), smooth(0, 0.6, e));
     fov = lerp(fov, 40, smooth(0, 0.6, e));
@@ -1526,8 +1613,6 @@ export class Engine {
     this.lensPass.uniforms.uCA.value = 0.0025 + boost * 0.012 + S.focusAmt * 0.002;
     this.bloom.strength = 0.7 + e * 0.15 - S.focusAmt * 0.2 + boost * 0.5 + introFlash * 0.8;
     // 오프닝 클로즈업에선 빛 번짐을 줄여 하이리온 얼굴이 하얗게 날아가지 않게
-    if (!this.introDone) this.bloom.strength *= 0.12 + 0.88 * smooth(3.4, 4.2, this.introT);
-    this.renderer.toneMappingExposure = this.introDone ? 1.05 : lerp(0.78, 1.05, smooth(3.4, 4.2, this.introT));
     this.updateLabels(e, carVisible);
     this.composer.render(dt);
   };
