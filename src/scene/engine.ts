@@ -12,7 +12,7 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
 import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
 import archivo from '../assets/archivo-black.typeface.json';
-import lionShapes from '../assets/lion-shapes.json';
+import { Lion, sampleSurface } from './lion';
 
 export interface EngineState {
   hero: number; // 1 = 첫 화면
@@ -20,11 +20,9 @@ export interface EngineState {
   focus: number; // 집중할 부품 번호 (0~4), -1 = 없음
   focusAmt: number; // 부품 클로즈업 정도
   launch: number; // 0 → 1 발사
-  campus: number; // 캠퍼스 맵 상승
   finale: number; // 마지막 귀환
-  emblem?: number; // 교표 무대가 화면에 있는 정도
-  emblemP?: number; // 교표 무대 스크롤 진행도
 }
+
 
 const SKY = new THREE.Color('#7fb2ff');
 // 부품별 고유 색 (배터리·라이다·모터·콕핏·서스펜션) — 클로즈업 무대 조명과 발광에 쓴다
@@ -56,6 +54,36 @@ function rimMat(color: THREE.Color, power = 2.4, k = 1.4) {
     blending: THREE.AdditiveBlending,
     depthWrite: false,
   });
+}
+
+// 무대 바닥 격자: 중심에서 멀어질수록 사라지고, uScroll로 바닥이 흘러가게(러닝머신) 할 수 있다
+function makeGrid(cx: number, cz: number) {
+  const grid = new THREE.Mesh(
+    new THREE.PlaneGeometry(80, 80),
+    new THREE.ShaderMaterial({
+      uniforms: { uColor: { value: SKY.clone() }, uTime: { value: 0 }, uPulse: { value: 0 }, uCenter: { value: new THREE.Vector2(cx, cz) }, uScroll: { value: 0 } },
+      vertexShader: `varying vec3 vW; void main(){ vec4 w = modelMatrix*vec4(position,1.0); vW = w.xyz; gl_Position = projectionMatrix*viewMatrix*w; }`,
+      fragmentShader: `uniform vec3 uColor; uniform float uTime; uniform float uPulse; uniform vec2 uCenter; uniform float uScroll; varying vec3 vW;
+        float line(float x, float w){ float d = abs(fract(x-0.5)-0.5)/max(fwidth(x), 1e-4); return 1.0-min(d/w,1.0); }
+        void main(){
+          vec2 q = vW.xz - uCenter;
+          float r = length(q);
+          float gx = q.x + uScroll;
+          float g = max(line(gx, 1.0), line(q.y, 1.0))*0.22 + max(line(gx*0.25, 1.2), line(q.y*0.25, 1.2))*0.35;
+          float fade = exp(-r*0.16);
+          float ring = smoothstep(0.08, 0.0, abs(r - mod(uTime*1.6, 14.0)))*0.5*uPulse;
+          float pad = smoothstep(3.4, 0.0, r)*0.18;
+          gl_FragColor = vec4(uColor*(g*fade + ring*fade + pad), (g*fade + ring*fade + pad));
+        }`,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      extensions: { derivatives: true } as any,
+    })
+  );
+  grid.rotation.x = -Math.PI / 2;
+  grid.position.set(cx, FLOOR_Y + 0.002, cz);
+  return grid;
 }
 
 function dotTexture() {
@@ -175,8 +203,9 @@ export class Engine {
   private lensPass: ShaderPass;
   private scene = new THREE.Scene();
   private camera = new THREE.PerspectiveCamera(38, 1, 0.1, 200);
-  private camPos = new THREE.Vector3(5.4, 1.5, 6.4);
-  private camTgt = new THREE.Vector3(0, -0.1, 0);
+  // 첫 프레임부터 하이리온 얼굴을 정면으로
+  private camPos = new THREE.Vector3(0.8, 0.95, 7.6);
+  private camTgt = new THREE.Vector3(0.15, 0.8, 2.6);
   private raf = 0;
   private timer = new THREE.Timer();
   private time = 0;
@@ -185,7 +214,7 @@ export class Engine {
   private mouseS = new THREE.Vector2();
   private shift = new THREE.Vector2(0.12, 0);
 
-  private s: EngineState = { hero: 1, explode: 0, focus: -1, focusAmt: 0, launch: 0, campus: 0, finale: 0, emblem: 0, emblemP: 0 };
+  private s: EngineState = { hero: 1, explode: 0, focus: -1, focusAmt: 0, launch: 0, finale: 0 };
 
   private car = new THREE.Group();
   private carYaw = 0;
@@ -217,31 +246,32 @@ export class Engine {
   private boosters: THREE.Mesh[] = [];
   private streaks!: THREE.InstancedMesh;
   private streakData: { x: number; y: number; z: number; len: number; v: number }[] = [];
-  private campusG = new THREE.Group();
-  private blocks!: THREE.InstancedMesh;
-  private blockTops!: THREE.InstancedMesh;
-  private blockData: { x: number; z: number; h: number; d: number; top: boolean }[] = [];
-  private arcFlow!: THREE.Points;
-  private arcCurve!: THREE.QuadraticBezierCurve3;
-  private campusAnchors: THREE.Object3D[] = [];
   private beams: THREE.Mesh[] = [];
   private dust!: THREE.Points;
   private wordmark!: THREE.Mesh;
   private underGlow!: THREE.PointLight;
   private letters: THREE.Mesh[] = [];
-  private lionMats: THREE.Material[] = [];
-  private sparks2!: THREE.Points;
+  private lion!: Lion;
+  private faceLight!: THREE.SpotLight;
   private roarWave!: THREE.Mesh;
   private energy!: THREE.Points;
-  private emblemG = new THREE.Group();
-  private coin = new THREE.Group();
-  private orbit!: THREE.Points;
-  private emblemSpot!: THREE.SpotLight;
   private lettersG = new THREE.Group();
   private key!: THREE.DirectionalLight;
   private focusSpot!: THREE.SpotLight;
   private holo = new THREE.Group();
   private holoMats: THREE.Material[] = [];
+
+  // 오프닝 변신
+  private introT = 0;
+  private introDone = false;
+  private burst = false;
+  private clip = new THREE.Plane(new THREE.Vector3(-1, 0, 0), 1e4);
+  private shards!: THREE.InstancedMesh;
+  private sFrom!: Float32Array;
+  private sTo!: Float32Array;
+  private sMid!: Float32Array;
+  private sDel!: Float32Array;
+  private scanRing!: THREE.Mesh;
 
   private labels: HTMLElement[] = [];
   private onResizeBound = () => this.resize();
@@ -300,10 +330,10 @@ export class Engine {
     this.buildStage();
     this.buildCar();
     this.buildFx();
-    this.buildCampus();
     this.buildLetters();
     this.buildBrand();
-    this.buildEmblem();
+    this.buildLion();
+    this.buildIntro();
 
     this.resize();
     addEventListener('resize', this.onResizeBound);
@@ -315,6 +345,13 @@ export class Engine {
   // 밝은(불투명) 섹션이 화면을 덮고 있을 땐 렌더링을 쉰다
   setPaused(p: boolean) {
     this.paused = p;
+  }
+
+  // 오프닝(사자 → 자동차)을 처음부터 다시
+  replayIntro() {
+    this.introT = 0;
+    this.introDone = false;
+    this.burst = false;
   }
 
   setState(s: Partial<EngineState>) {
@@ -348,7 +385,7 @@ export class Engine {
     key.shadow.camera.far = 30;
     key.shadow.bias = -0.0004;
     key.shadow.radius = 6;
-    sc.add(key);
+    sc.add(key, key.target);
 
     const rimL = new THREE.SpotLight('#3e7fd1', 160, 30, 0.6, 0.6, 2);
     rimL.position.set(-6, 4.5, -5);
@@ -364,7 +401,7 @@ export class Engine {
 
     // 반사 바닥 (모바일은 성능상 생략)
     if (!this.mobile) {
-      const mirror = new Reflector(new THREE.PlaneGeometry(80, 80), {
+      const mirror = new Reflector(new THREE.PlaneGeometry(260, 260), {
         textureWidth: Math.floor(innerWidth * 0.6),
         textureHeight: Math.floor(innerHeight * 0.6),
         color: new THREE.Color('#6d7c99'),
@@ -375,43 +412,21 @@ export class Engine {
     }
     // 반사 위를 덮는 반투명 짙은 바닥 → 광택 있는 검은 석재 느낌
     const tint = new THREE.Mesh(
-      new THREE.PlaneGeometry(80, 80),
+      new THREE.PlaneGeometry(260, 260),
       new THREE.MeshStandardMaterial({ color: '#04070e', metalness: 0.2, roughness: 0.55, transparent: true, opacity: this.mobile ? 1 : 0.9 })
     );
     tint.rotation.x = -Math.PI / 2;
     tint.position.y = FLOOR_Y - 0.001;
     tint.receiveShadow = true;
     sc.add(tint);
-    const shadowCatcher = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.ShadowMaterial({ opacity: 0.6 }));
+    const shadowCatcher = new THREE.Mesh(new THREE.PlaneGeometry(260, 260), new THREE.ShadowMaterial({ opacity: 0.6 }));
     shadowCatcher.rotation.x = -Math.PI / 2;
     shadowCatcher.position.y = FLOOR_Y;
     shadowCatcher.receiveShadow = true;
     sc.add(shadowCatcher);
 
     // 바닥 그리드 + 차량 아래 원형 발광
-    const grid = new THREE.Mesh(
-      new THREE.PlaneGeometry(80, 80),
-      new THREE.ShaderMaterial({
-        uniforms: { uColor: { value: SKY.clone() }, uTime: { value: 0 }, uPulse: { value: 0 } },
-        vertexShader: `varying vec3 vW; void main(){ vec4 w = modelMatrix*vec4(position,1.0); vW = w.xyz; gl_Position = projectionMatrix*viewMatrix*w; }`,
-        fragmentShader: `uniform vec3 uColor; uniform float uTime; uniform float uPulse; varying vec3 vW;
-          float line(float x, float w){ float d = abs(fract(x-0.5)-0.5)/max(fwidth(x), 1e-4); return 1.0-min(d/w,1.0); }
-          void main(){
-            float r = length(vW.xz);
-            float g = max(line(vW.x*1.0, 1.0), line(vW.z*1.0, 1.0))*0.22 + max(line(vW.x*0.25, 1.2), line(vW.z*0.25, 1.2))*0.35;
-            float fade = exp(-r*0.16);
-            float ring = smoothstep(0.08, 0.0, abs(r - mod(uTime*1.6, 14.0)))*0.5*uPulse;
-            float pad = smoothstep(3.4, 0.0, r)*0.18;
-            gl_FragColor = vec4(uColor*(g*fade + ring*fade + pad), (g*fade + ring*fade + pad));
-          }`,
-        transparent: true,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending,
-        extensions: { derivatives: true } as any,
-      })
-    );
-    grid.rotation.x = -Math.PI / 2;
-    grid.position.y = FLOOR_Y + 0.002;
+    const grid = makeGrid(0, 0);
     grid.name = 'grid';
     sc.add(grid);
 
@@ -1000,140 +1015,53 @@ export class Engine {
     this.battery.g.add(this.energy);
   }
 
-  /* ───────────────────────── 사자 무대: 엠블럼 실루엣을 입체로 세운 3D 사자 ───────────────────────── */
-  private buildEmblem() {
-    // 엠블럼 윤곽(OpenCV로 추출한 다각형)을 그대로 압출 → 숨 쉬고, 갈기가 출렁이고, 턱을 벌려 포효한다
-    const shapes = (lionShapes as { outer: number[][]; holes: number[][][] }[]).map((pc) => {
-      const sh = new THREE.Shape(pc.outer.map(([x, y]) => new THREE.Vector2(x, y)));
-      pc.holes.forEach((h) => sh.holes.push(new THREE.Path(h.map(([x, y]) => new THREE.Vector2(x, y)))));
-      return sh;
-    });
-    const geo = new THREE.ExtrudeGeometry(shapes, { depth: 0.1, bevelEnabled: true, bevelThickness: 0.025, bevelSize: 0.006, bevelSegments: 4, curveSegments: 1 });
-    geo.translate(0, 0, -0.05);
-    geo.computeVertexNormals();
-    const deform = `
-      uniform float uT; uniform float uRoar;
-      vec3 lionDeform(vec3 p){
-        p.xy *= 1.0 + 0.012*sin(uT*1.6);
-        float mane = smoothstep(-0.05, 0.35, p.x + p.y*0.6);
-        p.x += sin(uT*2.2 + p.y*10.0)*0.012*mane;
-        p.y += cos(uT*1.8 + p.x*9.0)*0.010*mane;
-        p.z += sin(uT*2.6 + p.x*7.0 + p.y*6.0)*0.06*mane;
-        float jaw = smoothstep(-0.03, -0.1, p.y) * smoothstep(-0.05, -0.15, p.x);
-        vec2 piv = vec2(-0.1, -0.02);
-        float a = uRoar*0.28*jaw;
-        vec2 d = p.xy - piv;
-        p.xy = piv + vec2(d.x*cos(a) - d.y*sin(a), d.x*sin(a) + d.y*cos(a));
-        return p;
-      }`;
-    const patch = (m: THREE.Material) => {
-      m.onBeforeCompile = (sh) => {
-        sh.uniforms.uT = { value: 0 };
-        sh.uniforms.uRoar = { value: 0 };
-        m.userData.sh = sh;
-        sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\n' + deform).replace('#include <begin_vertex>', 'vec3 transformed = lionDeform(vec3(position));');
-      };
-      this.lionMats.push(m);
-      return m;
-    };
-    const silver = patch(new THREE.MeshPhysicalMaterial({ color: '#b8c6de', metalness: 0.85, roughness: 0.34, clearcoat: 0.6, clearcoatRoughness: 0.2, envMapIntensity: 0.9 }));
-    const blueSide = patch(new THREE.MeshPhysicalMaterial({ color: '#1f5fbf', metalness: 0.8, roughness: 0.3, envMapIntensity: 1.2 }));
-    const lion = new THREE.Mesh(geo, [silver, blueSide]); // 앞뒤 면은 은색, 옆면은 한양 블루
-    lion.castShadow = true;
-    // 뒤에 깔린 발광 실루엣 — 사자를 감싸는 네온 후광
-    const back = new THREE.Mesh(geo, patch(new THREE.MeshBasicMaterial({ color: SKY.clone().multiplyScalar(0.7), toneMapped: false })));
-    back.position.z = -0.09;
-    back.scale.set(1.025, 1.025, 0.3);
-    this.coin.add(back, lion);
-    this.coin.scale.setScalar(3.4);
-
-    // 갈기에서 흩날리는 불꽃 입자 (사자 좌표계)
-    const ns = 320;
-    const seed = new Float32Array(ns * 3);
-    for (let i = 0; i < ns; i++) seed.set([Math.random() * 0.4 - 0.02, Math.random() * 0.8 - 0.35, Math.random()], i * 3);
-    const sg = new THREE.BufferGeometry();
-    sg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(ns * 3), 3).setUsage(THREE.DynamicDrawUsage));
-    sg.userData.seed = seed;
-    this.sparks2 = new THREE.Points(sg, new THREE.PointsMaterial({ size: 0.012, map: dotTexture(), color: SKY.clone().multiplyScalar(2.6), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }));
-    this.coin.add(this.sparks2);
-    // 포효할 때 입 앞에서 퍼지는 음파 링
-    this.roarWave = new THREE.Mesh(new THREE.RingGeometry(0.9, 1, 96), new THREE.MeshBasicMaterial({ color: SKY.clone().multiplyScalar(2.5), transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }));
-    this.roarWave.position.set(-0.42, -0.1, 0.05);
-    this.roarWave.rotation.y = Math.PI / 2.4;
-    this.coin.add(this.roarWave);
-    this.emblemG.add(this.coin);
-
-    // 코인 주위를 도는 입자 고리 두 개
-    const n = this.mobile ? 500 : 1100;
-    const pos = new Float32Array(n * 3);
-    for (let i = 0; i < n; i++) {
-      const a = Math.random() * Math.PI * 2, ring = i % 2, r = (ring ? 2.6 : 3.3) + (Math.random() - 0.5) * 0.25;
-      pos.set([Math.cos(a) * r, (Math.random() - 0.5) * 0.08, Math.sin(a) * r], i * 3);
-    }
-    const og = new THREE.BufferGeometry();
-    og.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    this.orbit = new THREE.Points(og, new THREE.PointsMaterial({ size: 0.045, map: dotTexture(), color: SKY.clone().multiplyScalar(2.2), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }));
-    this.orbit.rotation.x = 0.35;
-    this.emblemG.add(this.orbit);
-
-    // 받침 링 (바닥)
-    const pad = new THREE.Mesh(new THREE.RingGeometry(1.9, 1.94, 128), glow(SKY, 2.5));
-    pad.rotation.x = -Math.PI / 2;
-    pad.position.y = FLOOR_Y - 0.5 + 0.004;
-    this.emblemG.add(pad);
-
-    this.emblemSpot = new THREE.SpotLight('#ffffff', 0, 16, 0.5, 0.6, 1.2);
-    this.emblemSpot.position.set(2.5, 4.5, 4.5);
-    this.emblemG.add(this.emblemSpot, this.emblemSpot.target);
-    const rimL = new THREE.PointLight('#5f8dff', 0, 10, 2);
-    rimL.position.set(-3, 1.5, -2.5);
-    this.emblemG.add(rimL);
-    this.emblemG.userData.rimL = rimL;
-
-    this.emblemG.position.set(-32, 0.5, 0);
-    this.emblemG.visible = false;
-    this.scene.add(this.emblemG);
+  /* ───────────────────────── 사자 (오프닝 전용) ───────────────────────── */
+  private buildLion() {
+    this.lion = new Lion();
+    this.lion.root.scale.setScalar(1.1);
+    this.scene.add(this.lion.root);
+    this.lion.root.visible = false;
+    // (예전 사자의 음파 링 — 이제 마스코트가 자기 음파를 낸다)
+    this.roarWave = new THREE.Mesh(new THREE.RingGeometry(0.9, 1, 8), new THREE.MeshBasicMaterial({ visible: false }));
+    // 첫 장면 얼굴을 밝게 비추는 정면 조명
+    this.faceLight = new THREE.SpotLight('#ffffff', 0, 14, 0.5, 0.6, 1.2);
+    this.faceLight.position.set(1.2, 2.6, 7);
+    this.faceLight.target.position.set(0, 0.2, 2.6);
+    this.scene.add(this.faceLight, this.faceLight.target);
   }
 
-  /* ───────────────────────── 캠퍼스: 서울 · ERICA 3D 맵 ───────────────────────── */
-  private buildCampus() {
-    const clusters = [
-      { c: new THREE.Vector3(-3.7, 0, -1.2), r: 2.8 },
-      { c: new THREE.Vector3(3.4, 0, 1.6), r: 3.1 },
-    ];
-    for (const { c, r } of clusters) {
-      for (let gx = -12; gx <= 12; gx++)
-        for (let gz = -12; gz <= 12; gz++) {
-          const x = gx * 0.42 + (Math.random() - 0.5) * 0.06, z = gz * 0.42;
-          const d = Math.hypot(x, z) / r;
-          if (d > 1 || Math.random() < 0.18) continue;
-          const h = (0.15 + Math.pow(Math.random(), 3) * 2.8) * (1.05 - d * 0.6);
-          this.blockData.push({ x: c.x + x, z: c.z + z, h, d, top: Math.random() < 0.16 });
-        }
-      const a = new THREE.Object3D();
-      a.position.set(c.x, 2.3, c.z);
-      this.campusG.add(a);
-      this.campusAnchors.push(a);
+  /* ───────────────────────── 오프닝: 달려온 사자가 파편으로 터져 자동차로 다시 조립된다 ───────────────────────── */
+  private buildIntro() {
+    this.renderer.localClippingEnabled = true;
+    this.car.traverse((o) => {
+      const m = (o as THREE.Mesh).material;
+      if (!m) return;
+      (Array.isArray(m) ? m : [m]).forEach((mm) => {
+        mm.clippingPlanes = [this.clip];
+        mm.clipShadows = true;
+        if ((mm as THREE.ShaderMaterial).isShaderMaterial) (mm as THREE.ShaderMaterial).clipping = true;
+      });
+    });
+    const N = this.mobile ? 900 : 1800;
+    const g = new THREE.TetrahedronGeometry(0.055, 0);
+    this.shards = new THREE.InstancedMesh(g, new THREE.MeshBasicMaterial({ toneMapped: false }), N);
+    this.shards.frustumCulled = false;
+    this.shards.visible = false;
+    const c = new THREE.Color();
+    for (let i = 0; i < N; i++) {
+      const k = Math.random();
+      c.set(k < 0.7 ? '#173f82' : k < 0.94 ? '#5f95e8' : '#cfe4ff').multiplyScalar(k < 0.7 ? 0.9 : k < 0.94 ? 1.4 : 2.4);
+      this.shards.setColorAt(i, c);
     }
-    const bg = new THREE.BoxGeometry(0.32, 1, 0.32);
-    bg.translate(0, 0.5, 0);
-    this.blocks = new THREE.InstancedMesh(bg, new THREE.MeshStandardMaterial({ color: '#0f2a4f', metalness: 0.7, roughness: 0.3, envMapIntensity: 1.2 }), this.blockData.length);
-    this.blocks.castShadow = this.blocks.receiveShadow = true;
-    const tops = this.blockData.filter((b) => b.top).length;
-    this.blockTops = new THREE.InstancedMesh(new THREE.BoxGeometry(0.33, 0.025, 0.33), glow(SKY, 4), tops);
-    this.campusG.add(this.blocks, this.blockTops);
-
-    // 두 캠퍼스를 잇는 데이터 아치
-    this.arcCurve = new THREE.QuadraticBezierCurve3(new THREE.Vector3(-3.7, 1.5, -1.2), new THREE.Vector3(0, 6, 0), new THREE.Vector3(3.4, 1.8, 1.6));
-    const an = 220;
-    const ag = new THREE.BufferGeometry();
-    ag.setAttribute('position', new THREE.BufferAttribute(new Float32Array(an * 3), 3).setUsage(THREE.DynamicDrawUsage));
-    this.arcFlow = new THREE.Points(ag, new THREE.PointsMaterial({ size: 0.09, map: dotTexture(), color: SKY.clone().multiplyScalar(3), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }));
-    this.arcFlow.frustumCulled = false;
-    const arcLine = new THREE.Mesh(new THREE.TubeGeometry(this.arcCurve, 80, 0.008, 6), glow(SKY, 2, 0.6));
-    this.campusG.add(this.arcFlow, arcLine);
-    this.campusG.visible = false;
-    this.scene.add(this.campusG);
+    this.sFrom = new Float32Array(N * 3);
+    this.sTo = new Float32Array(N * 3);
+    this.sMid = new Float32Array(N * 3);
+    this.sDel = new Float32Array(N);
+    this.scene.add(this.shards);
+    // 재조립 경계선을 따라 흐르는 빛의 단면
+    this.scanRing = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ color: SKY.clone().multiplyScalar(3), transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false, side: THREE.DoubleSide }));
+    this.scanRing.scale.set(2.1, 1.3, 1);
+    this.scene.add(this.scanRing);
   }
 
   /* ───────────────────────── 매 프레임 ───────────────────────── */
@@ -1159,8 +1087,20 @@ export class Engine {
 
     this.mouseS.lerp(this.mouse, 1 - Math.exp(-dt * 3));
 
+    /* 오프닝 시계: 스크롤을 내리면 바로 완성된 차로 넘어간다 */
+    if (!this.introDone) {
+      this.introT += dt;
+      if (S.hero < 0.97 && this.introT < 3.6) this.introT = 6.3;
+      if (this.introT >= 6.3) {
+        this.introDone = true;
+        this.clip.constant = 1e4;
+        this.shards.visible = false;
+        (this.scanRing.material as THREE.MeshBasicMaterial).opacity = 0;
+      }
+    }
+
     /* 차량 위치·방향 */
-    const carVisible = S.campus < 0.35 || S.finale > 0.02;
+    const carVisible = true;
     this.car.visible = carVisible;
     let carX = 70 * easeIn3(S.launch);
     if (S.finale > 0) carX = lerp(-40, 0, easeOut3(clamp01(S.finale * 1.25)));
@@ -1168,7 +1108,8 @@ export class Engine {
     this.car.position.y = Math.sin(t * 1.4) * 0.015 * (1 - S.launch);
     const heroSpin = S.hero > 0.6 && S.explode < 0.01;
     const yawTarget = S.launch > 0.01 || S.finale > 0 ? (S.finale > 0 ? -0.55 * smooth(0.6, 1, S.finale) : 0) : -0.42;
-    if (heroSpin) {
+    if (!this.introDone) this.carYaw = -0.25;
+    else if (heroSpin) {
       let d = -0.25 + Math.sin(t * 0.22) * 0.75 - this.carYaw;
       d = Math.atan2(Math.sin(d), Math.cos(d));
       this.carYaw += d * (1 - Math.exp(-dt * 2));
@@ -1178,6 +1119,56 @@ export class Engine {
       this.carYaw += d * (1 - Math.exp(-dt * 2.5));
     }
     this.car.rotation.y = this.carYaw;
+
+    /* 오프닝: 사자 → 파편 → 자동차 */
+    let introFlash = 0;
+    if (!this.introDone) {
+      const IT = this.introT, tau = IT - 4.0;
+      const dir = new THREE.Vector3(Math.cos(this.carYaw), 0, -Math.sin(this.carYaw));
+      if (tau >= 0 && !this.burst) {
+        this.burst = true;
+        sampleSurface(this.lion.root, this.sDel.length, this.sFrom);
+        this.clip.constant = 1e4;
+        this.car.updateMatrixWorld(true);
+        sampleSurface(this.car, this.sDel.length, this.sTo);
+        const tv = new THREE.Vector3();
+        for (let i = 0; i < this.sDel.length; i++) {
+          tv.fromArray(this.sTo, i * 3);
+          const lx = tv.dot(dir);
+          this.sDel[i] = 0.8 + 1.1 * clamp01((lx + 2.6) / 5.3) - 0.75 + (Math.random() - 0.5) * 0.1;
+          this.sMid.set([
+            this.sFrom[i * 3] + (Math.random() - 0.3) * 2.2,
+            this.sFrom[i * 3 + 1] + 0.8 + Math.random() * 2.2,
+            this.sFrom[i * 3 + 2] + (Math.random() - 0.5) * 3,
+          ], i * 3);
+        }
+      }
+      const reveal = this.burst ? -2.6 + clamp01((tau - 0.8) / 1.1) * 5.4 : -10;
+      this.clip.normal.copy(dir).negate();
+      this.clip.constant = reveal;
+      this.shards.visible = this.burst && tau < 2.1;
+      if (this.shards.visible) {
+        const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e3 = new THREE.Euler(), p = new THREE.Vector3(), sc = new THREE.Vector3();
+        for (let i = 0; i < this.sDel.length; i++) {
+          const u = clamp01((tau - this.sDel[i]) / 0.75);
+          const k = u * u * (3 - 2 * u), ik = 1 - k;
+          p.set(
+            this.sFrom[i * 3] * ik * ik + this.sMid[i * 3] * 2 * ik * k + this.sTo[i * 3] * k * k,
+            this.sFrom[i * 3 + 1] * ik * ik + this.sMid[i * 3 + 1] * 2 * ik * k + this.sTo[i * 3 + 1] * k * k,
+            this.sFrom[i * 3 + 2] * ik * ik + this.sMid[i * 3 + 2] * 2 * ik * k + this.sTo[i * 3 + 2] * k * k
+          );
+          const s = u >= 1 ? 0 : 0.7 + 0.9 * Math.sin(Math.PI * Math.min(1, u + 0.15));
+          q.setFromEuler(e3.set(i + tau * 7, i * 1.3 + tau * 5, 0));
+          this.shards.setMatrixAt(i, m4.compose(p, q, sc.setScalar(s)));
+        }
+        this.shards.instanceMatrix.needsUpdate = true;
+      }
+      const sr = this.scanRing.material as THREE.MeshBasicMaterial;
+      sr.opacity = this.burst ? smooth(0.8, 0.95, tau) * (1 - smooth(1.8, 1.95, tau)) * 0.55 : 0;
+      this.scanRing.position.copy(dir).multiplyScalar(reveal).setY(-0.4);
+      this.scanRing.lookAt(this.scanRing.position.clone().add(dir));
+      introFlash = this.burst ? smooth(1.7, 1.95, tau) * (1 - smooth(1.95, 2.3, tau)) : 0;
+    }
 
     /* 분해 */
     const e = S.explode;
@@ -1238,7 +1229,8 @@ export class Engine {
     this.glass.opacity = lerp(0.82, 0.1, xr);
     this.edgeMat.opacity = xr * 0.85 * (1 - fq * 0.92);
     this.bodyGlows.forEach((m) => (m.opacity = 1 - fq * 0.85));
-    this.rim.uniforms.uK.value = lerp(0.9, 1.8, xr) * (1 - fq * 0.8);
+    // 오프닝 중엔 림 셰이더가 클리핑을 못 받으니, 차가 다 조립된 뒤에 켠다
+    this.rim.uniforms.uK.value = lerp(0.9, 1.8, xr) * (1 - fq * 0.8) * (this.introDone ? 1 : smooth(5.2, 5.9, this.introT));
 
     const focusOn = (i: number) => (S.focus === i ? S.focusAmt : 0);
 
@@ -1275,7 +1267,7 @@ export class Engine {
     const scanMat = this.scan.material as THREE.ShaderMaterial;
     scanMat.uniforms.uTime.value = t;
     scanMat.uniforms.uOrigin.value.copy(lidarWorld).add(new THREE.Vector3(0, 0.1, 0));
-    scanMat.uniforms.uAmt.value = carVisible ? ((0.18 + e * 0.5) * (1 - fa) + focusOn(1) * 1.2) * (1 - S.launch) * (1 - S.campus) : 0;
+    scanMat.uniforms.uAmt.value = carVisible ? ((0.18 + e * 0.5) * (1 - fa) + focusOn(1) * 1.2) * (1 - S.launch) : 0;
 
     // 모터
     this.rotor.rotation.z -= dt * (8 + focusOn(2) * 30 + S.launch * 40);
@@ -1365,75 +1357,37 @@ export class Engine {
       });
       this.streaks.instanceMatrix.needsUpdate = true;
     }
-    this.underGlow.intensity = carVisible ? 0.5 + e * 2 + boost * 12 : 0;
+    this.underGlow.intensity = carVisible ? 0.5 + e * 2 + boost * 12 + introFlash * 30 : 0;
     this.underGlow.position.x = carX;
 
-    /* 캠퍼스 */
-    this.campusG.visible = S.campus > 0.001 && S.finale < 0.98;
-    if (this.campusG.visible) {
-      const m4 = new THREE.Matrix4();
-      let ti = 0;
-      const fall = 1 - smooth(0, 0.6, S.finale);
-      this.blockData.forEach((b, i) => {
-        const k = easeOut3(smooth(b.d * 0.45, b.d * 0.45 + 0.5, S.campus)) * fall;
-        const h = Math.max(0.0001, b.h * k * (1 + Math.sin(t * 1.5 + b.x * 2 + b.z) * 0.04));
-        m4.makeScale(1, h, 1).setPosition(b.x, FLOOR_Y, b.z);
-        this.blocks.setMatrixAt(i, m4);
-        if (b.top) this.blockTops.setMatrixAt(ti++, m4.makeTranslation(b.x, FLOOR_Y + h + 0.012, b.z));
-      });
-      this.blocks.instanceMatrix.needsUpdate = this.blockTops.instanceMatrix.needsUpdate = true;
-      const ap = this.arcFlow.geometry.attributes.position as THREE.BufferAttribute;
-      const q = new THREE.Vector3();
-      for (let i = 0; i < ap.count; i++) {
-        const u = (t * 0.18 + i / ap.count) % 1;
-        this.arcCurve.getPoint(u, q);
-        ap.setXYZ(i, q.x, q.y, q.z);
+    /* ───── 사자: 정면에서 카메라를 노려보며 포효하고, 돌아서 질주해 자동차로 변신 ───── */
+    {
+      const lion = this.lion;
+      const L = lion.pose;
+      const IT = this.introT;
+      const on = !this.introDone && IT < 4.0;
+      lion.root.visible = on;
+      this.faceLight.intensity = on ? 3 * (1 - smooth(2.6, 4.0, IT)) : 0;
+      if (on) {
+        // 0~2.3초: 정면(+z)을 보고 버티고 서서 고개를 들어 포효 → 2.3초부터 돌아서 차 쪽(-z)으로 질주 → 3.6초 도약
+        const turn = smooth(2.2, 2.6, IT);
+        const run = smooth(2.4, 3.9, IT);
+        const leap = smooth(3.6, 4.0, IT);
+        lion.root.position.set(0, FLOOR_Y + Math.sin(Math.PI * leap) * 0.7, lerp(2.6, -0.4, run));
+        // 정면에서 살짝 비껴 서서(3/4) 얼굴과 갈기가 입체적으로 보이게
+        lion.root.rotation.set(0, lerp(-Math.PI / 2 + 0.38, Math.PI / 2, turn), 0);
+        L.speed = IT > 2.35 ? 5.5 / 1.1 : 0;
+        L.gait = 1;
+        L.roar = smooth(0.6, 1.0, IT) * (1 - smooth(1.9, 2.2, IT));
+        L.look = 0;
+        L.bow = 0;
+        lion.update(dt);
       }
-      ap.needsUpdate = true;
-      (this.arcFlow.material as THREE.PointsMaterial).opacity = smooth(0.4, 0.9, S.campus) * fall;
-    }
-
-    /* 사자 무대 */
-    const em = S.emblem || 0, ep = S.emblemP || 0;
-    this.emblemG.visible = em > 0.001;
-    if (this.emblemG.visible) {
-      // 1단계: 정면에서 포효 → 2단계: 3/4 각도로 돌아 두께를 보여줌 → 3단계: 비스듬히 물러남
-      const turn = easeOut3(smooth(0.3, 0.55, ep));
-      const lean = smooth(0.66, 0.9, ep);
-      const roar = Math.max(smooth(0.04, 0.12, ep) * (1 - smooth(0.22, 0.3, ep)), Math.pow(Math.max(0, Math.sin(t * 0.8)), 10) * 0.7);
-      this.lionMats.forEach((m) => {
-        const sh = m.userData.sh;
-        if (sh) {
-          sh.uniforms.uT.value = t;
-          sh.uniforms.uRoar.value = roar;
-        }
-      });
-      this.coin.rotation.y = Math.sin(t * 0.5) * 0.2 * (1 - turn) - 0.6 * turn + 0.25 * lean + this.mouseS.x * 0.3;
-      this.coin.rotation.x = Math.sin(t * 0.45) * 0.05 - this.mouseS.y * 0.15;
-      this.coin.position.y = Math.sin(t * 1.1) * 0.07 + (1 - smooth(0, 0.6, em)) * -1.5;
-      this.coin.position.x = -0.9 * lean;
-      // 갈기 불꽃
-      const sp = this.sparks2.geometry.attributes.position as THREE.BufferAttribute;
-      const seed = this.sparks2.geometry.userData.seed as Float32Array;
-      for (let i = 0; i < sp.count; i++) {
-        const u = (seed[i * 3 + 2] + t * 0.25) % 1;
-        sp.setXYZ(i, seed[i * 3] + u * 0.35, seed[i * 3 + 1] + u * 0.18 + Math.sin(t * 2 + i) * 0.01, Math.sin(i) * 0.08);
-      }
-      sp.needsUpdate = true;
-      // 포효 음파
-      const rw = this.roarWave.material as THREE.MeshBasicMaterial;
-      const wv = (t * 1.6) % 1;
-      this.roarWave.scale.setScalar(0.05 + wv * 0.45);
-      rw.opacity = roar * (1 - wv) * 0.9;
-      this.orbit.rotation.y = t * 0.12;
-      this.emblemSpot.intensity = 8 * em;
-      this.emblemSpot.target.position.copy(this.coin.position);
-      (this.emblemG.userData.rimL as THREE.PointLight).intensity = 16 * em;
     }
 
     /* 입체 글자: 첫 화면과 마지막 화면에서만 바닥에서 솟아오른다 */
     {
-      const amt = Math.max(S.hero, smooth(0.3, 0.9, S.finale));
+      const amt = Math.max(S.hero * (this.introDone ? 1 : smooth(5.3, 6.3, this.introT)), smooth(0.3, 0.9, S.finale));
       this.lettersG.visible = amt > 0.01;
       this.lettersG.scale.setScalar(portrait ? 0.6 : 1); // 세로 화면에선 글자가 잘리지 않게
       this.letters.forEach((m, i) => {
@@ -1444,7 +1398,7 @@ export class Engine {
     }
 
     /* 공기·조명 */
-    const ambient = (1 - S.launch * 0.7) * (1 - S.campus * 0.6) + S.finale;
+    const ambient = (1 - S.launch * 0.7) + S.finale;
     this.beams.forEach((b, i) => ((b.material as THREE.ShaderMaterial).uniforms.uAmt.value = ambient * (0.8 + 0.2 * Math.sin(t * 0.8 + i))));
     const dp = this.dust.geometry.attributes.position as THREE.BufferAttribute;
     for (let i = 0; i < dp.count; i++) {
@@ -1486,19 +1440,20 @@ export class Engine {
       this.holo.visible = false;
       this.focusSpot.intensity = 0;
     }
-    this.key.intensity = 2.4 * (1 - 0.5 * fa) * (1 - 0.45 * (S.emblem || 0));
+    this.key.intensity = 2.4 * (1 - 0.5 * fa);
     this.scene.environmentIntensity = 0.55 * (1 - 0.45 * fa);
 
     /* 카메라 */
     const pos = new THREE.Vector3(1.6, 1.7, 9.6);
     const tgt = new THREE.Vector3(0, -0.05, -2.4);
     let fov = 36;
-    {
-      const em2 = easeOut3(smooth(0, 1, S.emblem || 0));
-      const EX = -32, ep2 = S.emblemP || 0;
-      const orbitA = -0.25 + ep2 * 0.5;
-      pos.lerp(new THREE.Vector3(EX + Math.sin(orbitA) * 9.6, 1.0 + ep2 * 0.4, Math.cos(orbitA) * 9.6), em2);
-      tgt.lerp(new THREE.Vector3(EX, 0.45, 0), em2);
+    // 오프닝: 하이리온 얼굴을 정면에서 크게 → 달려가면 차가 보이는 자리로 물러난다
+    if (!this.introDone) {
+      const ic = 1 - smooth(2.3, 4.2, this.introT);
+      const push = smooth(0, 2.2, this.introT); // 천천히 다가가며 긴장감
+      pos.lerp(new THREE.Vector3(0.8, 0.95, lerp(7.6, 6.9, push)), ic);
+      tgt.lerp(new THREE.Vector3(0.15, 0.8, 2.6), ic);
+      fov = lerp(fov, 30, ic);
     }
     pos.lerp(new THREE.Vector3(7.4, 3.8, 10.0), smooth(0, 0.6, e));
     tgt.lerp(new THREE.Vector3(-0.3, 0.4, 0.2), smooth(0, 0.6, e));
@@ -1523,11 +1478,6 @@ export class Engine {
     pos.lerp(new THREE.Vector3(-3.4 + carX * 0.15, -0.05, 5.2), lk);
     tgt.lerp(new THREE.Vector3(carX + 1.5, -0.42, 0), lk);
     fov = lerp(fov, 58, smooth(0.05, 0.6, S.launch) * (1 - smooth(0.9, 1, S.launch)));
-    const ck = smooth(0, 0.5, S.campus);
-    const orbit = t * 0.04;
-    pos.lerp(new THREE.Vector3(Math.sin(orbit) * 4, 9.5, 13 + Math.cos(orbit) * 1.5), ck);
-    tgt.lerp(new THREE.Vector3(0, 0, 0), ck);
-    fov = lerp(fov, 42, ck);
     const fk = smooth(0, 0.8, S.finale);
     pos.lerp(new THREE.Vector3(1.4, 1.6, 9.2), fk);
     tgt.lerp(new THREE.Vector3(carX * 0.3, -0.05, -2.4), fk);
@@ -1541,7 +1491,7 @@ export class Engine {
     const right = new THREE.Vector3().subVectors(pos, tgt).cross(new THREE.Vector3(0, 1, 0)).normalize();
     pos.addScaledVector(right, -this.mouseS.x * 0.7).add(new THREE.Vector3(0, this.mouseS.y * 0.45, 0));
     // 발사 순간 카메라 진동
-    const shake = boost * 0.03;
+    const shake = boost * 0.03 + introFlash * 0.05;
     pos.x += (Math.random() - 0.5) * shake;
     pos.y += (Math.random() - 0.5) * shake;
 
@@ -1554,20 +1504,15 @@ export class Engine {
     // 화면 구도: 글이 있는 반대편으로 차를 비켜 세운다 (카메라는 그대로, 투영만 이동)
     let sx = 0, sy = 0;
     if (portrait) {
-      sy = lerp(0.1, 0.16, smooth(0, 0.5, e)) * (1 - ck) * (1 - fk) - fk * 0.08;
-      sy = lerp(sy, 0.2, smooth(0, 1, S.emblem || 0)); // 세로 화면: 코인은 위, 글은 아래
+      sy = lerp(0.1, 0.16, smooth(0, 0.5, e)) * (1 - fk) - fk * 0.08;
     } else {
       sx = lerp(0.1, 0.13, smooth(0, 0.5, e));
       sx = lerp(sx, 0, S.hero);
       sy = 0.04 * S.hero; // 첫 화면: 3D 글자와 차를 가운데에
-      sx = lerp(sx, 0.17, smooth(0, 1, S.emblem || 0)); // 교표 무대: 글은 왼쪽, 코인은 오른쪽
-      sy = lerp(sy, 0, smooth(0, 1, S.emblem || 0));
       const fq2 = S.focus >= 0 ? easeOut3(S.focusAmt) : 0;
       sx = lerp(sx, 0.14, fq2); // 설명 카드는 왼쪽 아래, 부품은 가운데-오른쪽
       sy = lerp(sy, 0.04, fq2);
       sx = lerp(sx, 0.04, lk);
-      sx = lerp(sx, 0, ck);
-      sy = lerp(sy, -0.04, ck);
       sx = lerp(sx, 0, fk);
       sy = lerp(sy, -0.12, fk);
     }
@@ -1579,8 +1524,10 @@ export class Engine {
     /* 렌즈 */
     this.lensPass.uniforms.uTime.value = t;
     this.lensPass.uniforms.uCA.value = 0.0025 + boost * 0.012 + S.focusAmt * 0.002;
-    this.bloom.strength = 0.7 + e * 0.15 - S.focusAmt * 0.2 + boost * 0.5 - 0.35 * (S.emblem || 0);
-
+    this.bloom.strength = 0.7 + e * 0.15 - S.focusAmt * 0.2 + boost * 0.5 + introFlash * 0.8;
+    // 오프닝 클로즈업에선 빛 번짐을 줄여 하이리온 얼굴이 하얗게 날아가지 않게
+    if (!this.introDone) this.bloom.strength *= 0.12 + 0.88 * smooth(3.4, 4.2, this.introT);
+    this.renderer.toneMappingExposure = this.introDone ? 1.05 : lerp(0.78, 1.05, smooth(3.4, 4.2, this.introT));
     this.updateLabels(e, carVisible);
     this.composer.render(dt);
   };
@@ -1608,8 +1555,5 @@ export class Engine {
       place(this.labels[i], this.parts[i + 1].anchor, partAlpha * focusDim);
       this.labels[i]?.classList.toggle('on', S.focus === i && S.focusAmt > 0.5);
     }
-    const ca = smooth(0.5, 0.9, S.campus) * (1 - smooth(0, 0.4, S.finale));
-    place(this.labels[5], this.campusAnchors[0], ca);
-    place(this.labels[6], this.campusAnchors[1], ca);
   }
 }
