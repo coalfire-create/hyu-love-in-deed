@@ -1183,8 +1183,8 @@ export class Engine {
     /* 오프닝 시계: 스크롤을 내리면 바로 완성된 차로 넘어간다 */
     if (!this.introDone) {
       this.introT += dt;
-      if (S.hero < 0.97 && this.introT < 2.6) this.introT = 5.3;
-      if (this.introT >= 5.3) {
+      if (S.hero < 0.97 && this.introT < 2.6) this.introT = 4.4;
+      if (this.introT >= 4.4) {
         this.introDone = true;
         this.clip.constant = 1e4;
         this.shards.visible = false;
@@ -1228,22 +1228,23 @@ export class Engine {
         for (let i = 0; i < this.sDel.length; i++) {
           tv.fromArray(this.sTo, i * 3);
           const lx = tv.dot(dir);
-          this.sDel[i] = 0.8 + 1.1 * clamp01((lx + 2.6) / 5.3) - 0.75 + (Math.random() - 0.5) * 0.1;
+          // 사자가 착지하는 순간 바로 차로 맞춰진다: 짧은 지연 + 짧은 비행
+          this.sDel[i] = 0.35 * clamp01((lx + 2.6) / 5.3) + Math.random() * 0.05;
           this.sMid.set([
-            this.sFrom[i * 3] + (Math.random() - 0.3) * 2.2,
-            this.sFrom[i * 3 + 1] + 0.8 + Math.random() * 2.2,
-            this.sFrom[i * 3 + 2] + (Math.random() - 0.5) * 3,
+            this.sFrom[i * 3] + (Math.random() - 0.5) * 0.8,
+            this.sFrom[i * 3 + 1] + 0.2 + Math.random() * 0.6,
+            this.sFrom[i * 3 + 2] + (Math.random() - 0.5) * 0.8,
           ], i * 3);
         }
       }
-      const reveal = this.burst ? -2.6 + clamp01((tau - 0.8) / 1.1) * 5.4 : -10;
+      const reveal = this.burst ? -2.6 + clamp01((tau - 0.08) / 0.55) * 5.4 : -10;
       this.clip.normal.copy(dir).negate();
       this.clip.constant = reveal;
-      this.shards.visible = this.burst && tau < 2.1;
+      this.shards.visible = this.burst && tau < 0.85;
       if (this.shards.visible) {
         const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e3 = new THREE.Euler(), p = new THREE.Vector3(), sc = new THREE.Vector3();
         for (let i = 0; i < this.sDel.length; i++) {
-          const u = clamp01((tau - this.sDel[i]) / 0.75);
+          const u = clamp01((tau - this.sDel[i]) / 0.35);
           const k = u * u * (3 - 2 * u), ik = 1 - k;
           p.set(
             this.sFrom[i * 3] * ik * ik + this.sMid[i * 3] * 2 * ik * k + this.sTo[i * 3] * k * k,
@@ -1257,10 +1258,10 @@ export class Engine {
         this.shards.instanceMatrix.needsUpdate = true;
       }
       const sr = this.scanRing.material as THREE.MeshBasicMaterial;
-      sr.opacity = this.burst ? smooth(0.8, 0.95, tau) * (1 - smooth(1.8, 1.95, tau)) * 0.55 : 0;
+      sr.opacity = this.burst ? smooth(0.05, 0.15, tau) * (1 - smooth(0.55, 0.65, tau)) * 0.55 : 0;
       this.scanRing.position.copy(dir).multiplyScalar(reveal).setY(-0.4);
       this.scanRing.lookAt(this.scanRing.position.clone().add(dir));
-      introFlash = this.burst ? smooth(1.7, 1.95, tau) * (1 - smooth(1.95, 2.3, tau)) : 0;
+      introFlash = this.burst ? smooth(0.0, 0.12, tau) * (1 - smooth(0.12, 0.5, tau)) : 0;
     }
 
     /* 분해 */
@@ -1327,7 +1328,7 @@ export class Engine {
     this.edgeMat.opacity = xr * 0.85 * (1 - fq * 0.92);
     this.bodyGlows.forEach((m) => (m.opacity = 1 - fq * 0.85));
     // 오프닝 중엔 림 셰이더가 클리핑을 못 받으니, 차가 다 조립된 뒤에 켠다
-    this.rim.uniforms.uK.value = lerp(0.9, 1.8, xr) * (1 - fq * 0.8) * (this.introDone ? 1 : smooth(4.2, 4.9, this.introT));
+    this.rim.uniforms.uK.value = lerp(0.9, 1.8, xr) * (1 - fq * 0.8) * (this.introDone ? 1 : smooth(3.6, 4.1, this.introT));
 
     const focusOn = (i: number) => (S.focus === i ? S.focusAmt : 0);
 
@@ -1482,7 +1483,7 @@ export class Engine {
 
     /* 입체 글자: 첫 화면과 마지막 화면에서만 바닥에서 솟아오른다 */
     {
-      const amt = Math.max(S.hero * (this.introDone ? 1 : smooth(4.3, 5.3, this.introT)), smooth(0.3, 0.9, S.finale));
+      const amt = Math.max(S.hero * (this.introDone ? 1 : smooth(3.3, 4.3, this.introT)), smooth(0.3, 0.9, S.finale));
       this.lettersG.visible = amt > 0.01;
       this.lettersG.scale.setScalar(portrait ? 0.6 : 1); // 세로 화면에선 글자가 잘리지 않게
       this.letters.forEach((m, i) => {
