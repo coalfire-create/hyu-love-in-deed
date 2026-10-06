@@ -87,19 +87,22 @@ h2 { font-size: clamp(34px, 4.8vw, 72px); font-weight: 800; line-height: 1.1; le
 .hero__side p { font-size: 14px; line-height: 1.7; color: var(--muted); }
 .hero__cta { display: flex; gap: 8px; pointer-events: auto; }
 
-/* name — 밝고 생기 있는 교명 섹션 */
-.name { min-height: 100svh; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: clamp(28px, 5vw, 90px); padding: 130px var(--gutter) 90px; overflow: hidden; color: var(--ink);
-  background-color: #eef4ff; background-image: linear-gradient(rgba(47, 111, 208, 0.07) 1px, transparent 1px), linear-gradient(90deg, rgba(47, 111, 208, 0.07) 1px, transparent 1px); background-size: 32px 32px; }
-.name__blobs { position: absolute; inset: 0; pointer-events: none; filter: blur(70px); }
-.name__blobs i { position: absolute; border-radius: 50%; opacity: 0.55; animation: blob 18s ease-in-out infinite alternate; }
-.name__blobs i:nth-child(1) { width: 46vw; height: 46vw; left: -10vw; top: -10vw; background: #7fb2ff; }
-.name__blobs i:nth-child(2) { width: 34vw; height: 34vw; left: 22vw; bottom: -14vw; background: #5ff2d2; animation-delay: -6s; }
-.name__blobs i:nth-child(3) { width: 30vw; height: 30vw; right: -8vw; top: 6vw; background: #c6adff; animation-delay: -12s; }
-@keyframes blob { to { transform: translate(6vw, 4vw) scale(1.15); } }
-.name__visual, .name__copy { position: relative; z-index: 1; }
-.name__visual { display: grid; place-items: center; min-height: 64vh; }
-.name__ghost { position: absolute; font-family: var(--han); font-weight: 900; font-size: clamp(170px, 25vw, 400px); line-height: 1; color: transparent; -webkit-text-stroke: 2px rgba(47, 111, 208, 0.28); letter-spacing: -0.03em; will-change: transform; user-select: none; }
-.coin-stage { position: relative; perspective: 1100px; display: grid; place-items: center; }
+/* name — 3D 교표 무대 (캔버스 위 투명 섹션) */
+.name { height: 320vh; pointer-events: none; }
+.name__sticky { display: flex; flex-direction: column; justify-content: center; padding: 0 var(--gutter); }
+.name__cap { max-width: 540px; animation: swap 0.9s var(--ease) both; }
+.name__cap h2 { margin-top: 18px; font-size: clamp(36px, 4.6vw, 70px); text-shadow: 0 10px 40px rgba(0, 0, 0, 0.6); }
+.name__cap .lead b { color: #fff; }
+.name__hanja { font-family: var(--han); font-weight: 900; font-size: 1.6em; line-height: 1.1; background: linear-gradient(180deg, #ffffff, #9cc4ff); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(4px 4px 0 #1d4b92); }
+.grad { background: linear-gradient(90deg, #7fb2ff, #5ff2d2 55%, #c6adff); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.nums { margin-top: 26px; display: flex; flex-direction: column; gap: 6px; }
+.nums div { display: flex; align-items: baseline; gap: 18px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.nums b { font-family: var(--display); font-weight: 700; font-size: clamp(64px, 8vw, 128px); line-height: 0.9; letter-spacing: -0.05em; min-width: 2.6ch; background: linear-gradient(180deg, #fff 30%, #7fb2ff); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.nums span { font-size: 15px; color: var(--muted); }
+.name__steps { position: absolute; left: var(--gutter); bottom: 34px; list-style: none; display: flex; gap: 6px; width: min(540px, calc(100% - 2 * var(--gutter))); }
+.name__steps li { flex: 1; padding-top: 10px; border-top: 2px solid rgba(255, 255, 255, 0.15); font-family: var(--display); font-size: 11px; letter-spacing: 0.16em; color: var(--muted); transition: color 0.4s, border-color 0.4s; }
+.name__steps li.done { border-color: rgba(143, 227, 255, 0.45); }
+.name__steps li.on { border-color: var(--cyan); color: #fff; }
 .coin { position: relative; transform-style: preserve-3d; will-change: transform; }
 .coin--big { width: clamp(240px, 26vw, 400px); aspect-ratio: 1; }
 .coin--small { width: 96px; aspect-ratio: 1; animation: spin 7s linear infinite; }
@@ -112,26 +115,8 @@ h2 { font-size: clamp(34px, 4.8vw, 72px); font-weight: 800; line-height: 1.1; le
 .coin__back img { width: 118%; height: 118%; object-fit: cover; object-position: 50% 30%; }
 .coin__edge { position: absolute; inset: 0; border-radius: 50%; background: linear-gradient(90deg, #1b3f78, #6f9fe8 50%, #1b3f78); }
 .coin-shadow { position: absolute; bottom: -12%; width: 70%; height: 30px; border-radius: 50%; background: radial-gradient(closest-side, rgba(14, 40, 90, 0.35), transparent); filter: blur(6px); animation: shadow 4s ease-in-out infinite; }
-.coin-stage .coin--big { animation: float 4s ease-in-out infinite; }
 @keyframes float { 50% { translate: 0 -16px; } }
 @keyframes shadow { 50% { transform: scale(0.85); opacity: 0.7; } }
-.name__hanja { margin-top: 40px; font-size: 14px; color: rgba(10, 20, 48, 0.6); letter-spacing: 0.04em; }
-.name__hanja b { font-family: var(--han); font-weight: 900; font-size: 22px; color: var(--blue); margin: 0 4px 0 14px; }
-.name .fig { color: var(--blue); }
-.name__copy h2 { margin-top: 16px; color: var(--ink); }
-.grad { background: linear-gradient(90deg, #2f6fd0, #18b6c9 50%, #7a5cff); -webkit-background-clip: text; background-clip: text; color: transparent; }
-.name .lead { color: rgba(10, 20, 48, 0.68); }
-.stat-grid { margin-top: 30px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
-.stat { position: relative; padding: 16px 16px 14px; border-radius: 16px; color: #fff; background: linear-gradient(150deg, var(--g2), var(--g1)); box-shadow: 0 16px 40px color-mix(in srgb, var(--g1) 40%, transparent); overflow: hidden; transition: transform 0.4s var(--ease); }
-.stat:hover { transform: translateY(-6px) rotate(-1.5deg); }
-.stat span { font-family: var(--display); font-size: 9px; letter-spacing: 0.18em; opacity: 0.85; }
-.stat b { display: block; margin-top: 18px; font-family: var(--display); font-weight: 700; font-size: clamp(30px, 2.8vw, 44px); line-height: 1; letter-spacing: -0.04em; }
-.stat em { display: block; margin-top: 6px; font-style: normal; font-size: 12px; opacity: 0.9; }
-.stat--lion { --g1: #0e4a84; --g2: #ffb547; background: linear-gradient(150deg, #ffb547, #e0612b); }
-.stat--lion img { position: absolute; right: -14px; bottom: -14px; width: 86px; opacity: 0.35; }
-.name__lion { margin-top: 22px; font-size: 14px; line-height: 1.8; color: rgba(10, 20, 48, 0.62); }
-.name__lion b { color: var(--ink); }
-
 /* tech */
 .tech { pointer-events: none; }
 .tech__intro { position: absolute; left: var(--gutter); top: 50%; transform: translateY(-50%); max-width: 560px; transition: opacity 0.6s; }
@@ -248,9 +233,9 @@ h2 { font-size: clamp(34px, 4.8vw, 72px); font-weight: 800; line-height: 1.1; le
   .nav__links { display: none; }
   .nav__cta { margin-left: auto; }
   .hero__bottom { flex-direction: column; align-items: flex-start; }
-  .name { grid-template-columns: 1fr; padding: 100px var(--gutter) 70px; }
-  .name__visual { min-height: 46vh; }
-  .stat-grid { grid-template-columns: 1fr 1fr; }
+  .name__sticky { justify-content: flex-end; padding-bottom: 90px; }
+  .name__cap h2 { font-size: 32px; }
+  .nums b { font-size: 56px; }
   .tech__intro { top: auto; bottom: 10vh; transform: none; right: var(--gutter); }
   .spec { bottom: 14px; }
   .spec__card { padding: 18px; }

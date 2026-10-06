@@ -108,7 +108,8 @@ export default function App() {
   const colleges = useRef<HTMLElement | null>(null);
   const campus = useRef<HTMLElement>(null);
   const finale = useRef<HTMLElement>(null);
-  const tilt = useRef<HTMLDivElement>(null);
+  const nameRef = useRef<HTMLElement>(null);
+  const [nameStep, setNameStep] = useState(0);
   const opaque = useRef<HTMLElement[]>([]);
   const [step, setStep] = useState(0);
   const [virtue, setVirtue] = useState(0);
@@ -125,7 +126,7 @@ export default function App() {
       setGlFail(true);
     }
 
-    let raf = 0, lastStep = -1, lastVirtue = -1, lastCollege = -1;
+    let raf = 0, lastStep = -1, lastVirtue = -1, lastCollege = -1, lastName = -1;
     const mouse = { x: 0, y: 0, sx: 0, sy: 0 };
     const onMove = (e: PointerEvent) => {
       mouse.x = e.clientX / innerWidth - 0.5;
@@ -160,7 +161,16 @@ export default function App() {
       const cp = progress(campus.current!);
       const fr = finale.current!.getBoundingClientRect();
       const fin = clamp01((vh - fr.top) / vh);
-      engine?.setState({ hero: clamp01(1 - scrollY / vh), explode: tm.explode, focus: tm.focus, focusAmt: tm.focusAmt, launch: smooth(0.05, 0.85, lp), campus: smooth(0, 0.55, cp), finale: fin });
+      const nr = nameRef.current!.getBoundingClientRect();
+      const np = progress(nameRef.current!);
+      const emblem = Math.min(clamp01((vh - nr.top) / vh), clamp01(nr.bottom / vh));
+      const ns = np < 0.33 ? 0 : np < 0.66 ? 1 : 2;
+      if (ns !== lastName) {
+        setNameStep((lastName = ns));
+        // 숫자 단계가 새로 그려지면 카운트업을 다시 건다
+        requestAnimationFrame(() => document.querySelectorAll('.nums [data-to]').forEach((el) => cio.observe(el)));
+      }
+      engine?.setState({ emblem, emblemP: np, hero: clamp01(1 - scrollY / vh), explode: tm.explode, focus: tm.focus, focusAmt: tm.focusAmt, launch: smooth(0.05, 0.85, lp), campus: smooth(0, 0.55, cp), finale: fin });
       const paused = opaque.current.some(covers);
       engine?.setPaused(paused);
       // 라벨마다 visibility가 따로 걸려 있어 부모 visibility로는 못 숨긴다 → display로 끈다
@@ -172,7 +182,6 @@ export default function App() {
       // 교표 코인: 천천히 돌면서 마우스 쪽으로 기운다 (앞=교표, 뒤=사자)
       const now = performance.now() / 1000;
       coins.forEach((cn) => (cn.style.transform = `rotateX(${(-mouse.sy * 18).toFixed(2)}deg) rotateY(${(now * 38 + mouse.sx * 40).toFixed(2)}deg)`));
-      if (tilt.current) tilt.current.style.transform = `translate3d(${(mouse.sx * -30).toFixed(1)}px, ${(mouse.sy * -20).toFixed(1)}px, 0)`;
 
       // 덕목 프리즘: 스크롤에 따라 사각 기둥이 위로 굴러간다
       const vp = smooth(0.04, 0.96, progress(values.current!)) * 3;
@@ -267,32 +276,38 @@ export default function App() {
           </div>
         </section>
 
-        {/* NAME — 밝고 생기 있는 교명 섹션 + 3D 교표 코인 */}
-        <section className="name" id="name" ref={addOpaque}>
-          <div className="name__blobs" aria-hidden><i /><i /><i /></div>
-          <div className="name__visual">
-            <span className="name__ghost" ref={tilt} aria-hidden>漢陽</span>
-            <div className="coin-stage">
-              <div className="coin coin--big">
-                <img className="coin__face" src="/brand/seal.png" alt="한양대학교 교표" />
-                {Array.from({ length: 14 }, (_, i) => <i key={i} className="coin__edge" style={{ transform: `translateZ(${-1 - i}px)` }} />)}
-                <div className="coin__back"><img src="/brand/lion-blue.png" alt="" /></div>
-              </div>
-              <div className="coin-shadow" />
+        {/* NAME — 3D 교표 무대: 사자 면 → 교표 면 → 숫자 */}
+        <section className="name" id="name" ref={nameRef}>
+          <div className="sticky name__sticky">
+            <div className="name__cap" key={nameStep}>
+              {nameStep === 0 && (
+                <>
+                  <span className="fig">FIG. 01 — SYMBOL</span>
+                  <h2>용기 있되<br />만용을 멀리하는<br /><span className="grad">사자.</span></h2>
+                  <p className="lead">한양의 상징은 사자입니다. 앞서되 교만하지 않는 지성인의 의지. 마스코트의 이름은 HanYang + Lion, <b>하이리온</b>.</p>
+                </>
+              )}
+              {nameStep === 1 && (
+                <>
+                  <span className="fig">FIG. 02 — 校名</span>
+                  <h2><span className="name__hanja">漢陽</span><br />서울의 옛 이름을<br />교명으로 건 대학.</h2>
+                  <p className="lead"><b>漢</b> 한수 한 · <b>陽</b> 볕 양. 1939년, 나라의 내일을 공학으로 세우겠다는 뜻으로 문을 연 대학은 수도의 이름을 걸고 대한민국 산업의 길을 함께 걸어 왔습니다.</p>
+                </>
+              )}
+              {nameStep === 2 && (
+                <>
+                  <span className="fig">FIG. 03 — IN NUMBERS</span>
+                  <div className="nums">
+                    <div><b data-to="1939">1939</b><span>개교</span></div>
+                    <div><b data-to="2">2</b><span>캠퍼스 · 서울 / ERICA</span></div>
+                    <div><b data-to="25">25</b><span>단과대학</span></div>
+                  </div>
+                </>
+              )}
             </div>
-            <p className="name__hanja"><b>漢</b> 한수 한 <b>陽</b> 볕 양</p>
-          </div>
-          <div className="name__copy">
-            <span className="fig">FIG. 01 — 校名 漢陽</span>
-            <h2 className="rv">서울의 옛 이름을<br /><span className="grad">교명으로 건 대학.</span></h2>
-            <p className="lead rv">한양은 서울의 옛 이름입니다. 1939년, 나라의 내일을 공학으로 세우겠다는 뜻으로 문을 연 이 대학은 수도의 이름을 걸고 대한민국 산업의 길을 함께 걸어 왔습니다.</p>
-            <div className="stat-grid">
-              <div className="stat rv" style={{ '--g1': '#2f6fd0', '--g2': '#5fb0ff' } as React.CSSProperties}><span>FOUNDED</span><b data-to="1939">1939</b><em>개교</em></div>
-              <div className="stat rv" style={{ '--g1': '#0b8f8a', '--g2': '#3ff0c8' } as React.CSSProperties}><span>CAMPUS</span><b data-to="2">2</b><em>서울 · ERICA</em></div>
-              <div className="stat rv" style={{ '--g1': '#5a33c4', '--g2': '#b08cff' } as React.CSSProperties}><span>COLLEGES</span><b data-to="25">25</b><em>단과대학</em></div>
-              <div className="stat stat--lion rv"><img src="/brand/lion-mask.png" alt="" /><span>SYMBOL</span><b>LION</b><em>하이리온</em></div>
-            </div>
-            <p className="name__lion rv">한양의 상징은 <b>사자</b> — 용기가 있되 만용을 멀리하고, 앞서되 교만하지 않는 지성인의 의지. 마스코트는 HanYang + Lion, <b>하이리온</b>.</p>
+            <ol className="name__steps">
+              {['SYMBOL', '校名', 'NUMBERS'].map((t, i) => <li key={t} className={i === nameStep ? 'on' : i < nameStep ? 'done' : ''}>{t}</li>)}
+            </ol>
           </div>
         </section>
 

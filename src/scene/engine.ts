@@ -21,6 +21,8 @@ export interface EngineState {
   launch: number; // 0 → 1 발사
   campus: number; // 캠퍼스 맵 상승
   finale: number; // 마지막 귀환
+  emblem?: number; // 교표 무대가 화면에 있는 정도
+  emblemP?: number; // 교표 무대 스크롤 진행도
 }
 
 const SKY = new THREE.Color('#7fb2ff');
@@ -182,7 +184,7 @@ export class Engine {
   private mouseS = new THREE.Vector2();
   private shift = new THREE.Vector2(0.12, 0);
 
-  private s: EngineState = { hero: 1, explode: 0, focus: -1, focusAmt: 0, launch: 0, campus: 0, finale: 0 };
+  private s: EngineState = { hero: 1, explode: 0, focus: -1, focusAmt: 0, launch: 0, campus: 0, finale: 0, emblem: 0, emblemP: 0 };
 
   private car = new THREE.Group();
   private carYaw = 0;
@@ -229,6 +231,10 @@ export class Engine {
   private lion!: THREE.Mesh;
   private sealFloor!: THREE.Mesh;
   private energy!: THREE.Points;
+  private emblemG = new THREE.Group();
+  private coin = new THREE.Group();
+  private orbit!: THREE.Points;
+  private emblemSpot!: THREE.SpotLight;
   private lettersG = new THREE.Group();
   private key!: THREE.DirectionalLight;
   private focusSpot!: THREE.SpotLight;
@@ -295,6 +301,7 @@ export class Engine {
     this.buildCampus();
     this.buildLetters();
     this.buildBrand();
+    this.buildEmblem();
 
     this.resize();
     addEventListener('resize', this.onResizeBound);
@@ -1026,6 +1033,83 @@ export class Engine {
     this.battery.g.add(this.energy);
   }
 
+  /* ───────────────────────── 교표 무대: 공중에 뜬 거대한 3D 코인 (앞 교표 · 뒤 사자) ───────────────────────── */
+  private buildEmblem() {
+    const tl = new THREE.TextureLoader();
+    const sealTex = tl.load('/brand/seal.png');
+    sealTex.colorSpace = THREE.SRGBColorSpace;
+    sealTex.anisotropy = 8;
+    sealTex.center.set(0.5, 0.5);
+    sealTex.rotation = Math.PI / 2; // 원기둥 뚜껑 UV가 90° 돌아가 있어 바로 세운다
+    const lionTex = tl.load('/brand/lion-blue.png');
+    lionTex.colorSpace = THREE.SRGBColorSpace;
+    lionTex.anisotropy = 8;
+    lionTex.center.set(0.5, 0.5);
+    lionTex.repeat.set(0.92, 0.92); // 살짝 확대
+    lionTex.rotation = Math.PI / 2;
+    // 테두리 톱니(리딩) 범프
+    const c = document.createElement('canvas');
+    c.width = 512;
+    c.height = 8;
+    const g = c.getContext('2d')!;
+    for (let x = 0; x < 512; x += 4) {
+      g.fillStyle = x % 8 ? '#000' : '#fff';
+      g.fillRect(x, 0, 4, 8);
+    }
+    const reed = new THREE.CanvasTexture(c);
+    reed.wrapS = THREE.RepeatWrapping;
+    reed.repeat.set(6, 1);
+    const R = 1.7, T = 0.26;
+    const edge = new THREE.MeshPhysicalMaterial({ color: '#9fb8e6', metalness: 1, roughness: 0.22, bumpMap: reed, bumpScale: 2, envMapIntensity: 1.8 });
+    const front = new THREE.MeshPhysicalMaterial({ map: sealTex, color: '#a9b6cf', metalness: 0.05, roughness: 0.7, clearcoat: 0.15, clearcoatRoughness: 0.4, envMapIntensity: 0.35 });
+    const back = new THREE.MeshPhysicalMaterial({ map: lionTex, color: '#a3b2cf', metalness: 0.05, roughness: 0.7, clearcoat: 0.15, clearcoatRoughness: 0.4, envMapIntensity: 0.35 });
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(R, R, T, 160, 1), [edge, front, back]);
+    body.rotation.x = Math.PI / 2; // 윗면(교표)이 +z, 아랫면(사자)이 -z 를 보게
+    body.castShadow = true;
+    const rimMat = new THREE.MeshPhysicalMaterial({ color: '#c9d8f5', metalness: 1, roughness: 0.15, envMapIntensity: 2 });
+    for (const z of [T / 2, -T / 2]) {
+      const rim = new THREE.Mesh(new THREE.TorusGeometry(R - 0.02, 0.05, 16, 160), rimMat);
+      rim.position.z = z;
+      rim.castShadow = true;
+      this.coin.add(rim);
+    }
+    this.coin.add(body);
+    const halo = new THREE.Mesh(new THREE.TorusGeometry(R + 0.35, 0.006, 6, 200), glow(SKY, 3));
+    this.coin.userData.halo = halo;
+    this.emblemG.add(this.coin, halo);
+
+    // 코인 주위를 도는 입자 고리 두 개
+    const n = this.mobile ? 500 : 1100;
+    const pos = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2, ring = i % 2, r = (ring ? 2.6 : 3.3) + (Math.random() - 0.5) * 0.25;
+      pos.set([Math.cos(a) * r, (Math.random() - 0.5) * 0.08, Math.sin(a) * r], i * 3);
+    }
+    const og = new THREE.BufferGeometry();
+    og.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    this.orbit = new THREE.Points(og, new THREE.PointsMaterial({ size: 0.045, map: dotTexture(), color: SKY.clone().multiplyScalar(2.2), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }));
+    this.orbit.rotation.x = 0.35;
+    this.emblemG.add(this.orbit);
+
+    // 받침 링 (바닥)
+    const pad = new THREE.Mesh(new THREE.RingGeometry(1.9, 1.94, 128), glow(SKY, 2.5));
+    pad.rotation.x = -Math.PI / 2;
+    pad.position.y = FLOOR_Y - 0.5 + 0.004;
+    this.emblemG.add(pad);
+
+    this.emblemSpot = new THREE.SpotLight('#ffffff', 0, 16, 0.5, 0.6, 1.2);
+    this.emblemSpot.position.set(2.5, 4.5, 4.5);
+    this.emblemG.add(this.emblemSpot, this.emblemSpot.target);
+    const rimL = new THREE.PointLight('#5f8dff', 0, 10, 2);
+    rimL.position.set(-3, 1.5, -2.5);
+    this.emblemG.add(rimL);
+    this.emblemG.userData.rimL = rimL;
+
+    this.emblemG.position.set(-32, 0.5, 0);
+    this.emblemG.visible = false;
+    this.scene.add(this.emblemG);
+  }
+
   /* ───────────────────────── 캠퍼스: 서울 · ERICA 3D 맵 ───────────────────────── */
   private buildCampus() {
     const clusters = [
@@ -1324,6 +1408,26 @@ export class Engine {
       (this.arcFlow.material as THREE.PointsMaterial).opacity = smooth(0.4, 0.9, S.campus) * fall;
     }
 
+    /* 교표 무대 */
+    const em = S.emblem || 0, ep = S.emblemP || 0;
+    this.emblemG.visible = em > 0.001;
+    if (this.emblemG.visible) {
+      // 사자 면(뒤) → 교표 면(앞)으로 뒤집히고, 마지막엔 비스듬히 기울어 두께를 보여준다
+      const flip = easeOut3(smooth(0.28, 0.5, ep));
+      const lean = smooth(0.66, 0.9, ep);
+      this.coin.rotation.y = Math.PI * (1 - flip) + Math.sin(t * 0.6) * 0.18 * (1 - lean) - 0.75 * lean + this.mouseS.x * 0.25;
+      this.coin.rotation.x = Math.sin(t * 0.5) * 0.06 + 0.25 * lean - this.mouseS.y * 0.15;
+      this.coin.position.y = Math.sin(t * 1.1) * 0.08 + (1 - smooth(0, 0.6, em)) * -1.5;
+      this.coin.position.x = -0.9 * lean;
+      const halo = this.coin.userData.halo as THREE.Mesh;
+      halo.rotation.set(Math.PI / 2 + 0.3, 0, t * 0.2);
+      halo.position.copy(this.coin.position);
+      this.orbit.rotation.y = t * 0.12;
+      this.emblemSpot.intensity = 10 * em;
+      this.emblemSpot.target.position.copy(this.coin.position);
+      (this.emblemG.userData.rimL as THREE.PointLight).intensity = 10 * em;
+    }
+
     /* 사자 홀로그램 + 바닥 교표 */
     {
       const amt = Math.max(S.hero, smooth(0.4, 1, S.finale));
@@ -1395,13 +1499,20 @@ export class Engine {
       this.holo.visible = false;
       this.focusSpot.intensity = 0;
     }
-    this.key.intensity = 2.4 * (1 - 0.5 * fa);
+    this.key.intensity = 2.4 * (1 - 0.5 * fa) * (1 - 0.45 * (S.emblem || 0));
     this.scene.environmentIntensity = 0.55 * (1 - 0.45 * fa);
 
     /* 카메라 */
     const pos = new THREE.Vector3(1.6, 1.7, 9.6);
     const tgt = new THREE.Vector3(0, -0.05, -2.4);
     let fov = 36;
+    {
+      const em2 = easeOut3(smooth(0, 1, S.emblem || 0));
+      const EX = -32, ep2 = S.emblemP || 0;
+      const orbitA = -0.25 + ep2 * 0.5;
+      pos.lerp(new THREE.Vector3(EX + Math.sin(orbitA) * 9.6, 1.0 + ep2 * 0.4, Math.cos(orbitA) * 9.6), em2);
+      tgt.lerp(new THREE.Vector3(EX, 0.45, 0), em2);
+    }
     pos.lerp(new THREE.Vector3(7.4, 3.8, 10.0), smooth(0, 0.6, e));
     tgt.lerp(new THREE.Vector3(-0.3, 0.4, 0.2), smooth(0, 0.6, e));
     fov = lerp(fov, 40, smooth(0, 0.6, e));
@@ -1457,10 +1568,13 @@ export class Engine {
     let sx = 0, sy = 0;
     if (portrait) {
       sy = lerp(0.1, 0.16, smooth(0, 0.5, e)) * (1 - ck) * (1 - fk) - fk * 0.08;
+      sy = lerp(sy, 0.2, smooth(0, 1, S.emblem || 0)); // 세로 화면: 코인은 위, 글은 아래
     } else {
       sx = lerp(0.1, 0.13, smooth(0, 0.5, e));
       sx = lerp(sx, 0, S.hero);
       sy = 0.04 * S.hero; // 첫 화면: 3D 글자와 차를 가운데에
+      sx = lerp(sx, 0.17, smooth(0, 1, S.emblem || 0)); // 교표 무대: 글은 왼쪽, 코인은 오른쪽
+      sy = lerp(sy, 0, smooth(0, 1, S.emblem || 0));
       const fq2 = S.focus >= 0 ? easeOut3(S.focusAmt) : 0;
       sx = lerp(sx, 0.14, fq2); // 설명 카드는 왼쪽 아래, 부품은 가운데-오른쪽
       sy = lerp(sy, 0.04, fq2);
@@ -1478,7 +1592,7 @@ export class Engine {
     /* 렌즈 */
     this.lensPass.uniforms.uTime.value = t;
     this.lensPass.uniforms.uCA.value = 0.0025 + boost * 0.012 + S.focusAmt * 0.002;
-    this.bloom.strength = 0.7 + e * 0.15 - S.focusAmt * 0.2 + boost * 0.5;
+    this.bloom.strength = 0.7 + e * 0.15 - S.focusAmt * 0.2 + boost * 0.5 - 0.35 * (S.emblem || 0);
 
     this.updateLabels(e, carVisible);
     this.composer.render(dt);
