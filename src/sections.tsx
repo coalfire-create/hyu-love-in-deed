@@ -3,7 +3,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Studio } from './scene/studio';
 import { Campus3D } from './scene/campus3d';
-import { LionStage } from './scene/lionStage';
 import { Eras3D } from './scene/eras3d';
 import { Corridor } from './scene/corridor';
 import campusData from './assets/campus.json';
@@ -87,17 +86,10 @@ function BentoFx({ i }: { i: number }) {
 
 export function NameSection() {
   const ref = useRef<HTMLElement>(null);
-  const cv = useRef<HTMLCanvasElement>(null);
-  const stageRef = useRef<LionStage | null>(null);
   const nums = useRef<(HTMLElement | null)[]>([]);
   const mouse = useRef({ x: 0, y: 0, sx: 0, sy: 0 });
   const [stage, setStage] = useState(0);
   useEffect(() => {
-    try {
-      stageRef.current = new LionStage(cv.current!);
-    } catch {
-      stageRef.current = null;
-    }
     const mv = (e: PointerEvent) => {
       mouse.current.x = e.clientX / innerWidth - 0.5;
       mouse.current.y = e.clientY / innerHeight - 0.5;
@@ -105,15 +97,13 @@ export function NameSection() {
     addEventListener('pointermove', mv);
     return () => {
       removeEventListener('pointermove', mv);
-      stageRef.current?.dispose();
     };
   }, []);
   useScrub(ref, (p, el) => {
-    // 0 한 문장 → 1 사자 → 2 교표 → 3 漢陽 → 4 숫자
-    // 사자 장면은 길게 머문다 (만지고 놀 수 있도록)
-    const W = [[0, 0.03, 0.09, 0.12], [0.12, 0.15, 0.44, 0.47], [0.47, 0.5, 0.58, 0.61], [0.61, 0.64, 0.74, 0.77], [0.77, 0.81, 2, 2]];
+    // 0 한 문장 → 2 교표 → 3 漢陽 → 4 숫자
+    const W: Record<number, number[]> = { 0: [0, 0.045, 0.14, 0.18], 2: [0.18, 0.225, 0.35, 0.39], 3: [0.39, 0.435, 0.59, 0.63], 4: [0.63, 0.69, 2, 2] };
     const vars: Record<string, number> = { '--p': p };
-    W.forEach(([a, b, c, d], i) => {
+    Object.entries(W).forEach(([i, [a, b, c, d]]) => {
       vars[`--in${i}`] = smooth(a, b, p);
       vars[`--out${i}`] = smooth(c, d, p);
     });
@@ -124,11 +114,9 @@ export function NameSection() {
     vars['--mx'] = m.sx;
     vars['--my'] = m.sy;
     setVars(el, vars);
-    const lp = clamp01((p - 0.12) / 0.35);
-    stageRef.current?.set(lp, p > 0.1 && p < 0.49);
     nums.current.forEach((n, i) => {
       if (!n) return;
-      const k = smooth(0.79 + i * 0.03, 0.93 + i * 0.015, p);
+      const k = smooth(0.67 + i * 0.045, 0.88 + i * 0.022, p);
       // 카드마다 진행도(--n): 카드 속 애니메이션이 숫자와 함께 차오르고, 다 차면 카드가 번쩍인다
       const cell = n.parentElement as HTMLElement;
       cell.style.setProperty('--n', k.toFixed(3));
@@ -136,7 +124,7 @@ export function NameSection() {
       const v = Math.round(NUMBERS[i][0] * (1 - Math.pow(1 - k, 3)));
       if (n.textContent !== String(v)) n.textContent = String(v);
     });
-    const s = p < 0.12 ? 0 : p < 0.47 ? 1 : p < 0.61 ? 2 : p < 0.77 ? 3 : 4;
+    const s = p < 0.18 ? 0 : p < 0.39 ? 2 : p < 0.63 ? 3 : 4;
     setStage((o) => (o === s ? o : s));
   });
   return (
@@ -146,16 +134,6 @@ export function NameSection() {
         <div className="hy__l hy__l--0" aria-hidden={stage !== 0}>
           <p className="eyebrow">FIG. 01 — SYMBOL</p>
           <h2 className="hy__motto">용기 있되,<br />만용을 멀리하라.</h2>
-        </div>
-        {/* 사자 */}
-        <div className="hy__l hy__l--1" aria-hidden={stage !== 1}>
-          <canvas className="hy__lion" ref={cv} />
-          <div className="hy__lioncap">
-            <p className="eyebrow">MASCOT</p>
-            <h3>하이리온.</h3>
-            <p>HanYang + Lion. 앞서되 교만하지 않는 지성인의 의지.</p>
-            <span className="hy__hint">머리를 쓰다듬거나 몸을 톡 눌러 보세요 · 좌우로 끌면 돌아가요</span>
-          </div>
         </div>
         {/* 교표 */}
         <div className="hy__l hy__l--2" aria-hidden={stage !== 2}>

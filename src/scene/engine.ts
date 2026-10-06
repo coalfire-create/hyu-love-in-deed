@@ -848,10 +848,10 @@ export class Engine {
         w.g.children.forEach((c) => (c as THREE.Mesh).isMesh && (c.visible = false));
       });
 
-      // 실차의 넓고 평평한 패널은 환경광을 그대로 비춰 하얗게 날아가니, 금속감을 낮추고 클리어코트로 광택을 낸다
-      this.paint.color.set('#0a3685');
-      this.paint.metalness = 0.5;
-      this.paint.roughness = 0.32;
+      // 건메탈 그레이 도장: 금속감은 적당히, 광택은 클리어코트로
+      this.paint.color.set('#41464e');
+      this.paint.metalness = 0.65;
+      this.paint.roughness = 0.3;
       this.paint.iridescence = 0;
       this.paint.envMapIntensity = 0.85;
       this.paint.needsUpdate = true;
