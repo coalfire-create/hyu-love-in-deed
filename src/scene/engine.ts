@@ -45,6 +45,36 @@ function glow(hex: THREE.ColorRepresentation, k = 3, opacity = 1) {
 }
 
 // 시선과 면이 비스듬할수록 빛나는 프레넬 림 라이트
+
+/* 차 전용 스튜디오 반사 환경: 자동차 광고 촬영장처럼 검은 공간에 천장 대형
+   소프트박스, 양옆 길쭉한 스트립 조명, 뒤쪽 푸른 띠를 둔다. 도장 위에 길고
+   선명한 하이라이트가 흐르게 하는 게 목적이라 차 재질에만 쓴다. */
+function carStudioEnv(renderer: THREE.WebGLRenderer) {
+  const env = new THREE.Scene();
+  env.background = new THREE.Color('#010205');
+  const panel = (w: number, h: number, color: string, k: number, pos: [number, number, number], rot: [number, number, number]) => {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(k * 0.32), side: THREE.DoubleSide }));
+    m.position.set(...pos);
+    m.rotation.set(...rot);
+    env.add(m);
+  };
+  // 천장 소프트박스 — 지붕·보닛에 넓은 하이라이트
+  panel(9, 3.2, '#ffffff', 5, [0, 6, 0], [Math.PI / 2, 0, 0]);
+  // 양옆 세로 스트립 — 옆면 캐릭터 라인을 따라 흐르는 가는 반사
+  for (const z of [-5, 5]) {
+    panel(12, 0.35, '#ffffff', 9, [0, 2.2, z], [0, 0, 0]);
+    panel(12, 0.18, '#dbe8ff', 6, [0, 0.9, z * 1.05], [0, 0, 0]);
+  }
+  // 앞뒤 수직 스트립과 뒤쪽 한양 블루 띠
+  for (const x of [-7, 7]) panel(0.4, 5, '#ffffff', 6, [x, 2.5, 0], [0, Math.PI / 2, 0]);
+  panel(14, 1.4, '#1f5fd6', 3.5, [0, 1.2, -8], [0, 0, 0]);
+  panel(14, 0.6, '#5aa0ff', 2.5, [0, 0.2, 8], [0, Math.PI, 0]);
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const tex = pmrem.fromScene(env, 0.02).texture;
+  pmrem.dispose();
+  return tex;
+}
+
 function rimMat(color: THREE.Color, power = 2.4, k = 1.4) {
   return new THREE.ShaderMaterial({
     uniforms: { uColor: { value: color.clone() }, uK: { value: k }, uP: { value: power } },
@@ -312,7 +342,7 @@ export class Engine {
           void main(){ vec4 c = texture2D(tDiffuse, vUv); if (any(isnan(c)) || any(isinf(c))) c = vec4(0.0); gl_FragColor = min(c, vec4(48.0)); }`,
       })
     );
-    this.bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.85, 0.55, 0.82);
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.45, 0.28, 0.95);
     this.composer.addPass(this.bloom);
     // 색수차 + 비네팅 + 필름 그레인 — 시네마 렌즈 느낌
     this.lensPass = new ShaderPass({
@@ -324,7 +354,7 @@ export class Engine {
           vec3 col = vec3(texture2D(tDiffuse, vUv+off).r, texture2D(tDiffuse, vUv).g, texture2D(tDiffuse, vUv-off).b);
           col *= 1.0 - uVig*smoothstep(0.3, 0.95, d);
           float n = fract(sin(dot(vUv*vec2(1733.0, 977.0) + uTime, vec2(12.9898, 78.233)))*43758.5453);
-          col += (n-0.5)*0.03;
+          col += (n-0.5)*0.014;
           gl_FragColor = vec4(col, 1.0);
         }`,
     });
@@ -848,12 +878,18 @@ export class Engine {
         w.g.children.forEach((c) => (c as THREE.Mesh).isMesh && (c.visible = false));
       });
 
-      // 건메탈 그레이 도장: 금속감은 적당히, 광택은 클리어코트로
-      this.paint.color.set('#41464e');
-      this.paint.metalness = 0.65;
-      this.paint.roughness = 0.3;
-      this.paint.iridescence = 0;
-      this.paint.envMapIntensity = 0.85;
+      // 미드나이트 티타늄 도장: 짙은 남색 금속 위에 거울 같은 클리어코트.
+      // 스튜디오 반사로 긴 하이라이트가 차체 곡면을 따라 흐른다.
+      const studio = carStudioEnv(this.renderer);
+      this.paint.color.set('#121a2a');
+      this.paint.metalness = 0.9;
+      this.paint.roughness = 0.2;
+      this.paint.clearcoat = 1;
+      this.paint.clearcoatRoughness = 0.015;
+      this.paint.iridescence = 0.15;
+      this.paint.iridescenceIOR = 1.5;
+      this.paint.envMap = studio;
+      this.paint.envMapIntensity = 1.0;
       this.paint.needsUpdate = true;
       const box = new THREE.Box3(), c = new THREE.Vector3(), m = new THREE.Matrix4();
       for (const mesh of meshes) {
@@ -870,6 +906,12 @@ export class Engine {
           m.decompose(mesh.position, mesh.quaternion, mesh.scale);
           (fixedMats.test(name) ? w.g : (w.g.userData.spin as THREE.Group)).add(mesh);
           if (/brakeCalipers/.test(name)) mesh.material = glow(SKY, 1.6);
+          else if (/rims|chrome/.test(name)) {
+            // 휠: 다크 크롬
+            mesh.material = new THREE.MeshPhysicalMaterial({ color: '#9aa4b4', metalness: 1, roughness: 0.16, clearcoat: 0.6, envMap: studio, envMapIntensity: 0.9 });
+          } else if (/rubber|tireProtector/.test(name)) {
+            mesh.material = new THREE.MeshStandardMaterial({ color: '#0b0c0f', metalness: 0, roughness: 0.78, envMap: studio, envMapIntensity: 0.4 });
+          }
           continue;
         }
         if (/body_color/.test(name)) {
@@ -877,20 +919,24 @@ export class Engine {
           continue;
         }
         if (/^light$/.test(name)) {
-          mesh.material = new THREE.MeshBasicMaterial({ color: new THREE.Color('#dff0ff').multiplyScalar(1.4), toneMapped: false, transparent: true });
+          mesh.material = new THREE.MeshBasicMaterial({ color: new THREE.Color('#e8f4ff').multiplyScalar(3.2), toneMapped: false, transparent: true });
           this.bodyGlows.push(mesh.material as THREE.MeshBasicMaterial);
           continue;
         }
         if (/^taillights$/.test(name)) {
-          mesh.material = new THREE.MeshBasicMaterial({ color: new THREE.Color('#ff3355').multiplyScalar(1.8), toneMapped: false, transparent: true });
+          mesh.material = new THREE.MeshBasicMaterial({ color: new THREE.Color('#ff2244').multiplyScalar(3.4), toneMapped: false, transparent: true });
           this.bodyGlows.push(mesh.material as THREE.MeshBasicMaterial);
           continue;
         }
         if (/plasticShiny/.test(name)) {
           // 유리: 짙은 스모크 글라스
-          mesh.material = new THREE.MeshPhysicalMaterial({ color: '#05070c', metalness: 0.2, roughness: 0.03, clearcoat: 1, clearcoatRoughness: 0.02, envMapIntensity: 2.6 });
+          mesh.material = new THREE.MeshPhysicalMaterial({ color: '#03050a', metalness: 0.4, roughness: 0.02, clearcoat: 1, clearcoatRoughness: 0.01, envMap: studio, envMapIntensity: 2.2 });
         }
         const mm = mesh.material as THREE.MeshStandardMaterial;
+        if (mm.isMeshStandardMaterial && !mm.envMap) {
+          mm.envMap = studio;
+          mm.envMapIntensity = 1.2;
+        }
         mm.transparent = true;
         this.shellMats.push({ m: mm, o: mm.opacity });
       }
@@ -1612,7 +1658,7 @@ export class Engine {
     /* 렌즈 */
     this.lensPass.uniforms.uTime.value = t;
     this.lensPass.uniforms.uCA.value = 0.0025 + boost * 0.012 + S.focusAmt * 0.002;
-    this.bloom.strength = 0.7 + e * 0.15 - S.focusAmt * 0.2 + boost * 0.5 + introFlash * 0.8;
+    this.bloom.strength = 0.42 + e * 0.12 - S.focusAmt * 0.15 + boost * 0.4 + introFlash * 0.4;
     // 오프닝 클로즈업에선 빛 번짐을 줄여 하이리온 얼굴이 하얗게 날아가지 않게
     this.updateLabels(e, carVisible);
     this.composer.render(dt);
