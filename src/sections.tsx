@@ -41,147 +41,7 @@ const setVars = (el: HTMLElement, vars: Record<string, number>) => {
   for (const k in vars) el.style.setProperty(k, vars[k].toFixed(4));
 };
 
-/* ───────────────────────── FIG 01·02 — 漢陽 ───────────────────────── */
-const NUMBERS: [number, string, string][] = [
-  [1939, '개교', '동아공과학원에서 시작한 해'],
-  [2, '캠퍼스', '서울 왕십리 · ERICA 안산'],
-  [25, '단과대학', '공학에서 예술까지'],
-  [87, '년', '쉬지 않고 달려온 시간'],
-];
-
-// 숫자 카드 속 그림: 개교(빛나는 교표) · 캠퍼스(두 점을 오가는 빛) · 단과대학(차례로 켜지는 25개 점) · 87년(차오르는 링)
-function BentoFx({ i }: { i: number }) {
-  if (i === 0)
-    return (
-      <span className="bfx bfx--seal" aria-hidden>
-        <img src="/brand/seal.svg" alt="" />
-      </span>
-    );
-  if (i === 1)
-    return (
-      <svg className="bfx bfx--link" viewBox="0 0 200 80" aria-hidden>
-        <path className="bfx__arc" d="M30 60 Q100 -10 170 60" pathLength={1} />
-        <circle className="bfx__dot" r="5" cx="30" cy="60" />
-        <circle className="bfx__dot bfx__dot--b" r="5" cx="170" cy="60" />
-        <circle className="bfx__run" r="3.5"><animateMotion dur="2.2s" repeatCount="indefinite" path="M30 60 Q100 -10 170 60" keyPoints="0;1;0" keyTimes="0;0.5;1" calcMode="linear" /></circle>
-        <text x="30" y="78">SEOUL</text>
-        <text x="170" y="78">ERICA</text>
-      </svg>
-    );
-  if (i === 2)
-    return (
-      <span className="bfx bfx--grid" aria-hidden>
-        {Array.from({ length: 25 }, (_, k) => <i key={k} style={{ '--k': k } as React.CSSProperties} />)}
-      </span>
-    );
-  return (
-    <svg className="bfx bfx--ring" viewBox="0 0 120 120" aria-hidden>
-      <circle className="bfx__track" cx="60" cy="60" r="50" />
-      <circle className="bfx__fill" cx="60" cy="60" r="50" pathLength={1} />
-      <text x="60" y="56">1939</text>
-      <text x="60" y="74">→ 2026</text>
-    </svg>
-  );
-}
-
-export function NameSection() {
-  const ref = useRef<HTMLElement>(null);
-  const nums = useRef<(HTMLElement | null)[]>([]);
-  const mouse = useRef({ x: 0, y: 0, sx: 0, sy: 0 });
-  const [stage, setStage] = useState(0);
-  useEffect(() => {
-    const mv = (e: PointerEvent) => {
-      mouse.current.x = e.clientX / innerWidth - 0.5;
-      mouse.current.y = e.clientY / innerHeight - 0.5;
-    };
-    addEventListener('pointermove', mv);
-    return () => {
-      removeEventListener('pointermove', mv);
-    };
-  }, []);
-  useScrub(ref, (p, el) => {
-    // 0 한 문장 → 2 교표 → 3 漢陽 → 4 숫자
-    const W: Record<number, number[]> = { 0: [0, 0.045, 0.14, 0.18], 2: [0.18, 0.225, 0.35, 0.39], 3: [0.39, 0.435, 0.59, 0.63], 4: [0.63, 0.69, 2, 2] };
-    const vars: Record<string, number> = { '--p': p };
-    Object.entries(W).forEach(([i, [a, b, c, d]]) => {
-      vars[`--in${i}`] = smooth(a, b, p);
-      vars[`--out${i}`] = smooth(c, d, p);
-    });
-    // 숫자 카드는 마우스를 따라 입체적으로 기운다
-    const m = mouse.current;
-    m.sx += (m.x - m.sx) * 0.08;
-    m.sy += (m.y - m.sy) * 0.08;
-    vars['--mx'] = m.sx;
-    vars['--my'] = m.sy;
-    setVars(el, vars);
-    nums.current.forEach((n, i) => {
-      if (!n) return;
-      const k = smooth(0.67 + i * 0.045, 0.88 + i * 0.022, p);
-      // 카드마다 진행도(--n): 카드 속 애니메이션이 숫자와 함께 차오르고, 다 차면 카드가 번쩍인다
-      const cell = n.parentElement as HTMLElement;
-      cell.style.setProperty('--n', k.toFixed(3));
-      cell.classList.toggle('done', k > 0.995);
-      const v = Math.round(NUMBERS[i][0] * (1 - Math.pow(1 - k, 3)));
-      if (n.textContent !== String(v)) n.textContent = String(v);
-    });
-    const s = p < 0.18 ? 0 : p < 0.39 ? 2 : p < 0.63 ? 3 : 4;
-    setStage((o) => (o === s ? o : s));
-  });
-  return (
-    <section className="hy" id="name" ref={ref} data-opaque>
-      <div className="sticky hy__sticky">
-        {/* 한 문장 */}
-        <div className="hy__l hy__l--0" aria-hidden={stage !== 0}>
-          <p className="eyebrow">FIG. 01 — SYMBOL</p>
-          <h2 className="hy__motto">용기 있되,<br />만용을 멀리하라.</h2>
-        </div>
-        {/* 교표 */}
-        <div className="hy__l hy__l--2" aria-hidden={stage !== 2}>
-          <div className="hy__sealimg">
-            <img src="/brand/seal.svg" alt="한양대학교 교표" />
-          </div>
-          <p className="hy__sub">사랑의 실천을 품은 교표.</p>
-        </div>
-        {/* 校名 */}
-        <div className="hy__l hy__l--3" aria-hidden={stage !== 3}>
-          <p className="eyebrow">FIG. 02 — 校名</p>
-          <div className="hy__hanja"><span>漢</span><span>陽</span></div>
-          <div className="hy__mean">
-            <div><b>漢</b><span>한수 한</span><p>한강, 큰 물줄기</p></div>
-            <div><b>陽</b><span>볕 양</span><p>그 북쪽의 밝은 땅</p></div>
-          </div>
-          <p className="hy__sub">서울의 옛 이름을 교명으로 건 대학.</p>
-        </div>
-        {/* 숫자 */}
-        <div className="hy__l hy__l--4" aria-hidden={stage !== 4}>
-          <p className="eyebrow">IN NUMBERS</p>
-          <h2 className="hy__h hy__h--sm">숫자로 보는 한양.</h2>
-          <div className="bento-stage">
-            <div className="bento">
-              {NUMBERS.map(([n, unit, d], i) => (
-                <div key={unit} className={`bento__cell bento__cell--${i}`} style={{ '--i': i } as React.CSSProperties}
-                  onPointerMove={(e) => {
-                    const r = e.currentTarget.getBoundingClientRect();
-                    e.currentTarget.style.setProperty('--sx', `${e.clientX - r.left}px`);
-                    e.currentTarget.style.setProperty('--sy', `${e.clientY - r.top}px`);
-                  }}>
-                  <i className="bento__shine" />
-                  <i className="bento__spot" />
-                  <BentoFx i={i} />
-                  <b ref={(e) => { nums.current[i] = e; }}>{n}</b>
-                  <span>{unit}</span>
-                  <p>{d}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-/* ───────────────────────── FIG 03 — 네 가지 덕목 (화이트 스튜디오) ───────────────────────── */
+/* ───────────────────────── VIRTUES ───────────────────────── */
 const VIRTUES = [
   { ko: '근면', en: 'Diligence', line: '오늘의 작은 수고가\n내일의 구조를 만든다.', d: '맞물린 톱니처럼, 하나의 수고가 다른 수고를 움직입니다.', c: '#b8862b' },
   { ko: '정직', en: 'Honesty', line: '숨김없이,\n있는 그대로.', d: '한 줄기 빛이 프리즘을 지나 일곱 빛깔을 모두 드러내듯.', c: '#0a84ff' },
@@ -215,7 +75,7 @@ export function VirtuesSection() {
     <section className="vt" id="values" ref={ref} data-opaque style={{ '--c': v.c } as React.CSSProperties}>
       <div className="sticky vt__sticky">
         <div className="vt__copy">
-          <p className="eyebrow eyebrow--dark">FIG. 03 — FOUR VIRTUES</p>
+          <p className="eyebrow eyebrow--dark">FIG. 02 — FOUR VIRTUES</p>
           <div className="vt__word" key={i}>
             <span className="vt__no">0{i + 1} — {v.en}</span>
             <h2>{v.ko}</h2>
@@ -305,7 +165,7 @@ export function HistorySection() {
       <div className="sticky hs__sticky">
         <i className="hs__aura" aria-hidden />
         <canvas className="hs__cv" ref={cv} aria-hidden />
-        <p className="eyebrow">FIG. 04 — SINCE 1939</p>
+        <p className="eyebrow">FIG. 03 — SINCE 1939</p>
         <div className="hs__year" aria-label={String(E.y)}>
           <i className="hs__window" aria-hidden />
           {[0, 1, 2, 3].map((i) => (
@@ -383,7 +243,7 @@ export function CollegesSection() {
       <div className="sticky cl__sticky">
         <canvas className="cl__cv" ref={cv} aria-hidden />
         <div className="cl__head">
-          <p className="eyebrow">FIG. 05 — COLLEGES</p>
+          <p className="eyebrow">FIG. 04 — COLLEGES</p>
           <h2>스물다섯 개의 문,<br />당신의 문은?</h2>
         </div>
         <div className="cl__now" key={ci}>
@@ -484,7 +344,7 @@ export function CampusSection() {
     <section className="cp" id="campus" ref={ref} data-opaque>
       <div className="sticky cp__sticky">
         <div className="cp__head">
-          <p className="eyebrow">FIG. 06 — TWO CAMPUSES</p>
+          <p className="eyebrow">FIG. 05 — TWO CAMPUSES</p>
           <h2>하나의 한양,<br />두 개의 엔진.</h2>
         </div>
         <div className="cp__grid">

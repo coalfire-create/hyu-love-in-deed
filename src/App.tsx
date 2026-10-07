@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Engine, ACCENTS } from './scene/engine';
-import { NameSection, VirtuesSection, HistorySection, CollegesSection, CampusSection } from './sections';
+import { VirtuesSection, HistorySection, CollegesSection, CampusSection } from './sections';
 
 // 부품 소개: 이름 · 한 줄 카피 · 기술 이름과 연구한 곳
 const PARTS = [
@@ -151,7 +151,7 @@ export default function App() {
       <header className="nav">
         <a href="#top" className="nav__logo"><img className="nav__seal" src="/brand/seal.svg" alt="" /><span className="nav__word">HANYANG<br />UNIVERSITY</span></a>
         <nav className="nav__links">
-          <a href="#name"><em>01</em>漢陽</a><a href="#tech"><em>02</em>Tech</a><a href="#values"><em>03</em>Virtues</a><a href="#colleges"><em>04</em>Colleges</a><a href="#campus"><em>05</em>Campus</a>
+          <a href="#tech"><em>01</em>Tech</a><a href="#values"><em>02</em>Virtues</a><a href="#colleges"><em>03</em>Colleges</a><a href="#campus"><em>04</em>Campus</a>
         </nav>
         <a className="nav__cta" href="https://go.hanyang.ac.kr" target="_blank" rel="noopener">입학 안내</a>
       </header>
@@ -170,13 +170,12 @@ export default function App() {
               <p>사랑의 실천 — Love in Deed and Truth. 1939년부터, 말이 아니라 기술로 증명해 온 대학.</p>
               <div className="hero__cta">
                 <a href="#tech" className="btn btn--blue">엔진 열어보기</a>
-                <a href="#name" className="btn btn--line">Scroll</a>
+                <a href="#tech" className="btn btn--line">Scroll</a>
               </div>
             </div>
           </div>
         </section>
 
-        <NameSection />
 
         {/* TECH — 3D 분해도 */}
         <section className="tech" id="tech" ref={tech} style={{ height: `${TECH_STEPS * 110}vh` }}>
@@ -184,7 +183,7 @@ export default function App() {
             <div className="tech__intro" data-show={step <= 1 || step === 7}>
               {step === 0 && (
                 <div key="s0" className="swap">
-                  <span className="fig">FIG. 02 — TECHNOLOGY</span>
+                  <span className="fig">FIG. 01 — TECHNOLOGY</span>
                   <h2>미래의 차 한 대,<br />그 안의 한양.</h2>
                   <p className="lead">스크롤하면 차가 열립니다.</p>
                 </div>
@@ -240,7 +239,7 @@ export default function App() {
         {/* FINALE — 3D 무대로 돌아온 차와 솟아오르는 글자 */}
         <section className="finale" id="apply" ref={finale}>
           <div className="finale__inner">
-            <span className="fig">FIG. 07 — IGNITION</span>
+            <span className="fig">FIG. 06 — IGNITION</span>
             <h2>사랑의 실천자,<br />한양에서 시동을 겁니다.</h2>
             <a className="btn btn--blue btn--big" href="https://go.hanyang.ac.kr" target="_blank" rel="noopener">입학처 바로가기 →</a>
           </div>
